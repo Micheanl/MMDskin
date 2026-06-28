@@ -33,12 +33,52 @@ test {
     useJUnitPlatform()
 }
 
+def nativePlatform = providers.provider {
+    def osName = System.getProperty("os.name").toLowerCase(Locale.ROOT)
+    def os = osName.contains("win") ? "windows" : osName.contains("mac") || osName.contains("darwin") ? "macos" : osName.contains("linux") ? "linux" : null
+    if (os == null) {
+        throw new GradleException("Unsupported OS: ${System.getProperty("os.name")}")
+    }
+    def archName = System.getProperty("os.arch").toLowerCase(Locale.ROOT)
+    def arch = ["x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"][archName]
+    if (arch == null) {
+        throw new GradleException("Unsupported architecture: ${System.getProperty("os.arch")}")
+    }
+    "${os}-${arch}"
+}
+
+def nativeLibraryName = providers.provider {
+    def platform = nativePlatform.get()
+    platform.startsWith("windows-") ? "mmdskin_native.dll" : platform.startsWith("macos-") ? "libmmdskin_native.dylib" : "libmmdskin_native.so"
+}
+
+def nativeLibraryFile = layout.projectDirectory.file(providers.provider {
+    "native/target/release/${nativeLibraryName.get()}"
+})
+
+tasks.register("buildNativeRust", Exec) {
+    workingDir = layout.projectDirectory.dir("native")
+    commandLine "cargo", "build", "--release", "--package", "mmdskin-native"
+    inputs.files(fileTree("native/crates/mmdskin-native/src"))
+    inputs.file("native/crates/mmdskin-native/Cargo.toml")
+    inputs.file("native/Cargo.toml")
+    inputs.file("native/Cargo.lock")
+    outputs.file(nativeLibraryFile)
+}
+
 processResources {
     def version = project.version
     inputs.property "version", version
 
     filesMatching("fabric.mod.json") {
         expand "version": version
+    }
+}
+
+processClientResources {
+    dependsOn tasks.named("buildNativeRust")
+    from(nativeLibraryFile) {
+        into "natives/${nativePlatform.get()}"
     }
 }
 
