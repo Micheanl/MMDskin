@@ -43,6 +43,29 @@ final class MMDNativeModelTest {
     }
 
     @Test
+    void exposesModelMesh() {
+        MMDModelMesh mesh = new MMDModelMesh(
+                new float[] {0.0F, 1.0F, 2.0F},
+                new float[] {0.0F, 1.0F, 0.0F},
+                new float[] {0.25F, 0.75F},
+                new int[] {0, 1, 2},
+                new int[] {0},
+                new int[] {3},
+                new float[] {1.0F}
+        );
+
+        try (MMDNativeModel model = new MMDNativeModel(
+                7,
+                handle -> NativeStatus.OK,
+                handle -> MMDModelKind.PMX,
+                handle -> new MMDModelSummary(1, 3, 1, 0),
+                handle -> mesh
+        )) {
+            assertEquals(mesh, model.mesh());
+        }
+    }
+
+    @Test
     void closesOnlyOnce() {
         AtomicInteger closes = new AtomicInteger();
         MMDNativeModel model = new MMDNativeModel(7, handle -> {

@@ -18,6 +18,19 @@ public final class MMDNative {
 
     private static native int modelSummaryRaw(long handle, long[] outSummary);
 
+    private static native int modelMeshCountsRaw(long handle, long[] outCounts);
+
+    private static native int modelMeshReadRaw(
+            long handle,
+            float[] positions,
+            float[] normals,
+            float[] uvs,
+            int[] indices,
+            int[] materialStarts,
+            int[] materialCounts,
+            float[] materialAlphas
+    );
+
     public static MMDNativeEngine engineCreate() {
         return new MMDNativeEngine(engineCreateRaw(), MMDNative::engineDestroy);
     }
@@ -50,5 +63,41 @@ public final class MMDNative {
             throw new IllegalStateException("Native model summary failed: " + status);
         }
         return new MMDModelSummary(summary[0], summary[1], summary[2], summary[3]);
+    }
+
+    static MMDModelMesh modelMesh(long handle) {
+        long[] counts = new long[5];
+        NativeStatus status = NativeStatus.fromCode(modelMeshCountsRaw(handle, counts));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native model mesh counts failed: " + status);
+        }
+        float[] positions = new float[checkedArrayLength(counts[0])];
+        float[] normals = new float[checkedArrayLength(counts[1])];
+        float[] uvs = new float[checkedArrayLength(counts[2])];
+        int[] indices = new int[checkedArrayLength(counts[3])];
+        int[] materialStarts = new int[checkedArrayLength(counts[4])];
+        int[] materialCounts = new int[materialStarts.length];
+        float[] materialAlphas = new float[materialStarts.length];
+        status = NativeStatus.fromCode(modelMeshReadRaw(
+                handle,
+                positions,
+                normals,
+                uvs,
+                indices,
+                materialStarts,
+                materialCounts,
+                materialAlphas
+        ));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native model mesh read failed: " + status);
+        }
+        return new MMDModelMesh(positions, normals, uvs, indices, materialStarts, materialCounts, materialAlphas);
+    }
+
+    private static int checkedArrayLength(long value) {
+        if (value < 0 || value > Integer.MAX_VALUE) {
+            throw new IllegalStateException("Native array is too large: " + value);
+        }
+        return (int) value;
     }
 }

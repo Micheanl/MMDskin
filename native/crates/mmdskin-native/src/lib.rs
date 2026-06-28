@@ -1,7 +1,7 @@
 mod handles;
 mod status;
 
-use jni::objects::{JClass, JLongArray, JString};
+use jni::objects::{JClass, JFloatArray, JIntArray, JLongArray, JString};
 use jni::{errors::Result as JniResult, EnvUnowned, Outcome};
 use mmd_anim::format::{MmdFormatKind, detect_mmd_format, parse_pmd_model, parse_pmx_model};
 use std::ffi::c_void;
@@ -53,25 +53,41 @@ pub unsafe extern "C" fn mmdskin_model_load(
     let Ok(data) = fs::read(path) else {
         return NativeStatus::NotFound as i32;
     };
-    let (kind, summary) = match detect_mmd_format(&data, Some(path)) {
-        MmdFormatKind::Pmd => (
-            handles::ModelKind::Pmd,
-            parse_pmd_model(&data).map(pmd_summary).unwrap_or_default(),
-        ),
-        MmdFormatKind::Pmx => (
-            handles::ModelKind::Pmx,
-            parse_pmx_model(&data).map(pmx_summary).unwrap_or_default(),
-        ),
+    let (kind, summary, mesh) = match detect_mmd_format(&data, Some(path)) {
+        MmdFormatKind::Pmd => match parse_pmd_model(&data) {
+            Ok(model) => (
+                handles::ModelKind::Pmd,
+                pmd_summary(&model),
+                pmd_mesh(&model),
+            ),
+            Err(_) => (
+                handles::ModelKind::Pmd,
+                handles::ModelSummary::default(),
+                handles::ModelMesh::default(),
+            ),
+        },
+        MmdFormatKind::Pmx => match parse_pmx_model(&data) {
+            Ok(model) => (
+                handles::ModelKind::Pmx,
+                pmx_summary(&model),
+                pmx_mesh(&model),
+            ),
+            Err(_) => (
+                handles::ModelKind::Pmx,
+                handles::ModelSummary::default(),
+                handles::ModelMesh::default(),
+            ),
+        },
         _ => return NativeStatus::InvalidArgument as i32,
     };
-    let model = handles::create_model(engine, kind, summary);
+    let model = handles::create_model(engine, kind, summary, mesh);
     unsafe {
         *out_model = model;
     }
     NativeStatus::Ok as i32
 }
 
-fn pmd_summary(model: mmd_anim::format::PmdParsedModel) -> handles::ModelSummary {
+fn pmd_summary(model: &mmd_anim::format::PmdParsedModel) -> handles::ModelSummary {
     handles::ModelSummary {
         vertices: model.metadata.counts.vertices as u32,
         indices: model.geometry.indices.len() as u32,
@@ -80,12 +96,68 @@ fn pmd_summary(model: mmd_anim::format::PmdParsedModel) -> handles::ModelSummary
     }
 }
 
-fn pmx_summary(model: mmd_anim::format::PmxParsedModel) -> handles::ModelSummary {
+fn pmx_summary(model: &mmd_anim::format::PmxParsedModel) -> handles::ModelSummary {
     handles::ModelSummary {
         vertices: model.metadata.counts.vertices as u32,
         indices: model.geometry.indices.len() as u32,
         materials: model.metadata.counts.materials as u32,
         bones: model.metadata.counts.bones as u32,
+    }
+}
+
+fn pmd_mesh(model: &mmd_anim::format::PmdParsedModel) -> handles::ModelMesh {
+    let mut positions = Vec::with_capacity(model.geometry.vertices.len() * 3);
+    let mut normals = Vec::with_capacity(model.geometry.vertices.len() * 3);
+    let mut uvs = Vec::with_capacity(model.geometry.vertices.len() * 2);
+    for vertex in &model.geometry.vertices {
+        positions.extend_from_slice(&vertex.position);
+        normals.extend_from_slice(&vertex.normal);
+        uvs.extend_from_slice(&vertex.uv);
+    }
+    let mut material_starts = Vec::with_capacity(model.materials.len());
+    let mut material_counts = Vec::with_capacity(model.materials.len());
+    let mut material_alphas = Vec::with_capacity(model.materials.len());
+    let mut start = 0_u32;
+    for material in &model.materials {
+        let count = material.face_count.saturating_mul(3);
+        material_starts.push(start);
+        material_counts.push(count);
+        material_alphas.push(material.diffuse[3]);
+        start = start.saturating_add(count);
+    }
+    handles::ModelMesh {
+        positions,
+        normals,
+        uvs,
+        indices: model.geometry.indices.iter().map(|&index| u32::from(index)).collect(),
+        material_starts,
+        material_counts,
+        material_alphas,
+    }
+}
+
+fn pmx_mesh(model: &mmd_anim::format::PmxParsedModel) -> handles::ModelMesh {
+    let mut material_starts = Vec::with_capacity(model.geometry.material_groups.len());
+    let mut material_counts = Vec::with_capacity(model.geometry.material_groups.len());
+    let mut material_alphas = Vec::with_capacity(model.geometry.material_groups.len());
+    for group in &model.geometry.material_groups {
+        material_starts.push(group.start as u32);
+        material_counts.push(group.count as u32);
+        let alpha = model
+            .materials
+            .get(group.material_index)
+            .map(|material| material.diffuse[3])
+            .unwrap_or(1.0);
+        material_alphas.push(alpha);
+    }
+    handles::ModelMesh {
+        positions: model.geometry.positions.clone(),
+        normals: model.geometry.normals.clone(),
+        uvs: model.geometry.uvs.clone(),
+        indices: model.geometry.indices.clone(),
+        material_starts,
+        material_counts,
+        material_alphas,
     }
 }
 
@@ -132,6 +204,86 @@ pub unsafe extern "C" fn mmdskin_model_summary(
     out[3] = summary.bones;
     NativeStatus::Ok as i32
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmdskin_model_mesh_counts(
+    handle: u64,
+    out_counts: *mut u32,
+    out_len: usize,
+) -> i32 {
+    if handle == 0 || out_counts.is_null() || out_len < 5 {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    let Some(mesh) = handles::model_mesh(handle) else {
+        return NativeStatus::NotFound as i32;
+    };
+    let out = unsafe { slice::from_raw_parts_mut(out_counts, out_len) };
+    out[0] = mesh.positions.len() as u32;
+    out[1] = mesh.normals.len() as u32;
+    out[2] = mesh.uvs.len() as u32;
+    out[3] = mesh.indices.len() as u32;
+    out[4] = mesh.material_starts.len() as u32;
+    NativeStatus::Ok as i32
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmdskin_model_mesh_read(
+    handle: u64,
+    out_positions: *mut f32,
+    out_positions_len: usize,
+    out_normals: *mut f32,
+    out_normals_len: usize,
+    out_uvs: *mut f32,
+    out_uvs_len: usize,
+    out_indices: *mut u32,
+    out_indices_len: usize,
+    out_material_starts: *mut u32,
+    out_material_starts_len: usize,
+    out_material_counts: *mut u32,
+    out_material_counts_len: usize,
+    out_material_alphas: *mut f32,
+    out_material_alphas_len: usize,
+) -> i32 {
+    if handle == 0
+        || out_positions.is_null()
+        || out_normals.is_null()
+        || out_uvs.is_null()
+        || out_indices.is_null()
+        || out_material_starts.is_null()
+        || out_material_counts.is_null()
+        || out_material_alphas.is_null()
+    {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    let Some(mesh) = handles::model_mesh(handle) else {
+        return NativeStatus::NotFound as i32;
+    };
+    if out_positions_len < mesh.positions.len()
+        || out_normals_len < mesh.normals.len()
+        || out_uvs_len < mesh.uvs.len()
+        || out_indices_len < mesh.indices.len()
+        || out_material_starts_len < mesh.material_starts.len()
+        || out_material_counts_len < mesh.material_counts.len()
+        || out_material_alphas_len < mesh.material_alphas.len()
+    {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    unsafe {
+        slice::from_raw_parts_mut(out_positions, mesh.positions.len())
+            .copy_from_slice(&mesh.positions);
+        slice::from_raw_parts_mut(out_normals, mesh.normals.len()).copy_from_slice(&mesh.normals);
+        slice::from_raw_parts_mut(out_uvs, mesh.uvs.len()).copy_from_slice(&mesh.uvs);
+        slice::from_raw_parts_mut(out_indices, mesh.indices.len()).copy_from_slice(&mesh.indices);
+        slice::from_raw_parts_mut(out_material_starts, mesh.material_starts.len())
+            .copy_from_slice(&mesh.material_starts);
+        slice::from_raw_parts_mut(out_material_counts, mesh.material_counts.len())
+            .copy_from_slice(&mesh.material_counts);
+        slice::from_raw_parts_mut(out_material_alphas, mesh.material_alphas.len())
+            .copy_from_slice(&mesh.material_alphas);
+    }
+    NativeStatus::Ok as i32
+}
+
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_nativeVersion(
@@ -270,6 +422,133 @@ pub unsafe extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNat
                         summary[3] as i64,
                     ],
                 )?;
+            }
+            Ok(status)
+        })
+        .into_outcome()
+    {
+        Outcome::Ok(status) => status,
+        Outcome::Err(_) | Outcome::Panic(_) => NativeStatus::InternalError as i32,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_modelMeshCountsRaw(
+    mut env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    handle: i64,
+    out_counts: JLongArray<'_>,
+) -> i32 {
+    if handle < 0 || out_counts.is_null() {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    match env
+        .with_env(|env| -> JniResult<i32> {
+            if out_counts.len(env)? < 5 {
+                return Ok(NativeStatus::InvalidArgument as i32);
+            }
+            let mut counts = [0_u32; 5];
+            let status = unsafe {
+                mmdskin_model_mesh_counts(handle as u64, counts.as_mut_ptr(), counts.len())
+            };
+            if status == NativeStatus::Ok as i32 {
+                out_counts.set_region(
+                    env,
+                    0,
+                    &[
+                        counts[0] as i64,
+                        counts[1] as i64,
+                        counts[2] as i64,
+                        counts[3] as i64,
+                        counts[4] as i64,
+                    ],
+                )?;
+            }
+            Ok(status)
+        })
+        .into_outcome()
+    {
+        Outcome::Ok(status) => status,
+        Outcome::Err(_) | Outcome::Panic(_) => NativeStatus::InternalError as i32,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_modelMeshReadRaw(
+    mut env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    handle: i64,
+    out_positions: JFloatArray<'_>,
+    out_normals: JFloatArray<'_>,
+    out_uvs: JFloatArray<'_>,
+    out_indices: JIntArray<'_>,
+    out_material_starts: JIntArray<'_>,
+    out_material_counts: JIntArray<'_>,
+    out_material_alphas: JFloatArray<'_>,
+) -> i32 {
+    if handle < 0
+        || out_positions.is_null()
+        || out_normals.is_null()
+        || out_uvs.is_null()
+        || out_indices.is_null()
+        || out_material_starts.is_null()
+        || out_material_counts.is_null()
+        || out_material_alphas.is_null()
+    {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    match env
+        .with_env(|env| -> JniResult<i32> {
+            let positions_len = out_positions.len(env)? as usize;
+            let normals_len = out_normals.len(env)? as usize;
+            let uvs_len = out_uvs.len(env)? as usize;
+            let indices_len = out_indices.len(env)? as usize;
+            let material_starts_len = out_material_starts.len(env)? as usize;
+            let material_counts_len = out_material_counts.len(env)? as usize;
+            let material_alphas_len = out_material_alphas.len(env)? as usize;
+            let mut positions = vec![0.0_f32; positions_len];
+            let mut normals = vec![0.0_f32; normals_len];
+            let mut uvs = vec![0.0_f32; uvs_len];
+            let mut indices = vec![0_u32; indices_len];
+            let mut material_starts = vec![0_u32; material_starts_len];
+            let mut material_counts = vec![0_u32; material_counts_len];
+            let mut material_alphas = vec![0.0_f32; material_alphas_len];
+            let status = unsafe {
+                mmdskin_model_mesh_read(
+                    handle as u64,
+                    positions.as_mut_ptr(),
+                    positions.len(),
+                    normals.as_mut_ptr(),
+                    normals.len(),
+                    uvs.as_mut_ptr(),
+                    uvs.len(),
+                    indices.as_mut_ptr(),
+                    indices.len(),
+                    material_starts.as_mut_ptr(),
+                    material_starts.len(),
+                    material_counts.as_mut_ptr(),
+                    material_counts.len(),
+                    material_alphas.as_mut_ptr(),
+                    material_alphas.len(),
+                )
+            };
+            if status == NativeStatus::Ok as i32 {
+                let indices = indices.iter().map(|&value| value as i32).collect::<Vec<_>>();
+                let material_starts = material_starts
+                    .iter()
+                    .map(|&value| value as i32)
+                    .collect::<Vec<_>>();
+                let material_counts = material_counts
+                    .iter()
+                    .map(|&value| value as i32)
+                    .collect::<Vec<_>>();
+                out_positions.set_region(env, 0, &positions)?;
+                out_normals.set_region(env, 0, &normals)?;
+                out_uvs.set_region(env, 0, &uvs)?;
+                out_indices.set_region(env, 0, &indices)?;
+                out_material_starts.set_region(env, 0, &material_starts)?;
+                out_material_counts.set_region(env, 0, &material_counts)?;
+                out_material_alphas.set_region(env, 0, &material_alphas)?;
             }
             Ok(status)
         })
@@ -443,6 +722,64 @@ mod tests {
             NativeStatus::Ok as i32
         );
         assert_eq!(summary, [3, 3, 1, 3]);
+        assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
+        assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
+    }
+
+    #[test]
+    fn model_load_reads_pmx_mesh() {
+        let engine = crate::mmdskin_engine_create();
+        let bytes = fs::read(pmx_fixture_path()).unwrap();
+        let path = write_temp_model("mesh.pmx", &bytes);
+        let mut model = 0_u64;
+
+        assert_eq!(
+            unsafe { crate::mmdskin_model_load(engine, path.as_ptr(), path.len(), &mut model) },
+            NativeStatus::Ok as i32
+        );
+
+        let mut counts = [0_u32; 5];
+        assert_eq!(
+            unsafe { crate::mmdskin_model_mesh_counts(model, counts.as_mut_ptr(), counts.len()) },
+            NativeStatus::Ok as i32
+        );
+        assert_eq!(counts, [9, 9, 6, 3, 1]);
+
+        let mut positions = vec![0.0_f32; counts[0] as usize];
+        let mut normals = vec![0.0_f32; counts[1] as usize];
+        let mut uvs = vec![0.0_f32; counts[2] as usize];
+        let mut indices = vec![0_u32; counts[3] as usize];
+        let mut material_starts = vec![0_u32; counts[4] as usize];
+        let mut material_counts = vec![0_u32; counts[4] as usize];
+        let mut material_alphas = vec![0.0_f32; counts[4] as usize];
+
+        assert_eq!(
+            unsafe {
+                crate::mmdskin_model_mesh_read(
+                    model,
+                    positions.as_mut_ptr(),
+                    positions.len(),
+                    normals.as_mut_ptr(),
+                    normals.len(),
+                    uvs.as_mut_ptr(),
+                    uvs.len(),
+                    indices.as_mut_ptr(),
+                    indices.len(),
+                    material_starts.as_mut_ptr(),
+                    material_starts.len(),
+                    material_counts.as_mut_ptr(),
+                    material_counts.len(),
+                    material_alphas.as_mut_ptr(),
+                    material_alphas.len(),
+                )
+            },
+            NativeStatus::Ok as i32
+        );
+        assert_eq!(indices, [0, 1, 2]);
+        assert_eq!(material_starts, [0]);
+        assert_eq!(material_counts, [3]);
+        assert_eq!(material_alphas, [1.0]);
+
         assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
         assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
     }
