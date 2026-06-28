@@ -29,6 +29,20 @@ final class MMDNativeModelTest {
     }
 
     @Test
+    void exposesModelSummary() {
+        MMDModelSummary summary = new MMDModelSummary(3, 9, 1, 2);
+
+        try (MMDNativeModel model = new MMDNativeModel(
+                7,
+                handle -> NativeStatus.OK,
+                handle -> MMDModelKind.PMX,
+                handle -> summary
+        )) {
+            assertEquals(summary, model.summary());
+        }
+    }
+
+    @Test
     void closesOnlyOnce() {
         AtomicInteger closes = new AtomicInteger();
         MMDNativeModel model = new MMDNativeModel(7, handle -> {

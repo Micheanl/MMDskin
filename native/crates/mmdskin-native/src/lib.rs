@@ -3,7 +3,7 @@ mod status;
 
 use jni::objects::{JClass, JLongArray, JString};
 use jni::{errors::Result as JniResult, EnvUnowned, Outcome};
-use mmd_anim::format::{MmdFormatKind, detect_mmd_format};
+use mmd_anim::format::{MmdFormatKind, detect_mmd_format, parse_pmd_model, parse_pmx_model};
 use std::ffi::c_void;
 use std::fs;
 use std::slice;
@@ -53,16 +53,40 @@ pub unsafe extern "C" fn mmdskin_model_load(
     let Ok(data) = fs::read(path) else {
         return NativeStatus::NotFound as i32;
     };
-    let kind = match detect_mmd_format(&data, Some(path)) {
-        MmdFormatKind::Pmd => handles::ModelKind::Pmd,
-        MmdFormatKind::Pmx => handles::ModelKind::Pmx,
+    let (kind, summary) = match detect_mmd_format(&data, Some(path)) {
+        MmdFormatKind::Pmd => (
+            handles::ModelKind::Pmd,
+            parse_pmd_model(&data).map(pmd_summary).unwrap_or_default(),
+        ),
+        MmdFormatKind::Pmx => (
+            handles::ModelKind::Pmx,
+            parse_pmx_model(&data).map(pmx_summary).unwrap_or_default(),
+        ),
         _ => return NativeStatus::InvalidArgument as i32,
     };
-    let model = handles::create_model(engine, kind);
+    let model = handles::create_model(engine, kind, summary);
     unsafe {
         *out_model = model;
     }
     NativeStatus::Ok as i32
+}
+
+fn pmd_summary(model: mmd_anim::format::PmdParsedModel) -> handles::ModelSummary {
+    handles::ModelSummary {
+        vertices: model.metadata.counts.vertices as u32,
+        indices: model.geometry.indices.len() as u32,
+        materials: model.metadata.counts.materials as u32,
+        bones: model.metadata.counts.bones as u32,
+    }
+}
+
+fn pmx_summary(model: mmd_anim::format::PmxParsedModel) -> handles::ModelSummary {
+    handles::ModelSummary {
+        vertices: model.metadata.counts.vertices as u32,
+        indices: model.geometry.indices.len() as u32,
+        materials: model.metadata.counts.materials as u32,
+        bones: model.metadata.counts.bones as u32,
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -87,6 +111,26 @@ pub extern "C" fn mmdskin_model_kind(handle: u64) -> i32 {
         Some(handles::ModelKind::Pmx) => 11,
         None => NativeStatus::NotFound as i32,
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmdskin_model_summary(
+    handle: u64,
+    out_summary: *mut u32,
+    out_len: usize,
+) -> i32 {
+    if handle == 0 || out_summary.is_null() || out_len < 4 {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    let Some(summary) = handles::model_summary(handle) else {
+        return NativeStatus::NotFound as i32;
+    };
+    let out = unsafe { slice::from_raw_parts_mut(out_summary, out_len) };
+    out[0] = summary.vertices;
+    out[1] = summary.indices;
+    out[2] = summary.materials;
+    out[3] = summary.bones;
+    NativeStatus::Ok as i32
 }
 
 #[unsafe(no_mangle)]
@@ -196,6 +240,46 @@ pub extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_mod
     mmdskin_model_kind(handle as u64)
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_modelSummaryRaw(
+    mut env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    handle: i64,
+    out_summary: JLongArray<'_>,
+) -> i32 {
+    if handle < 0 || out_summary.is_null() {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    match env
+        .with_env(|env| -> JniResult<i32> {
+            if out_summary.len(env)? < 4 {
+                return Ok(NativeStatus::InvalidArgument as i32);
+            }
+            let mut summary = [0_u32; 4];
+            let status = unsafe {
+                mmdskin_model_summary(handle as u64, summary.as_mut_ptr(), summary.len())
+            };
+            if status == NativeStatus::Ok as i32 {
+                out_summary.set_region(
+                    env,
+                    0,
+                    &[
+                        summary[0] as i64,
+                        summary[1] as i64,
+                        summary[2] as i64,
+                        summary[3] as i64,
+                    ],
+                )?;
+            }
+            Ok(status)
+        })
+        .into_outcome()
+    {
+        Outcome::Ok(status) => status,
+        Outcome::Err(_) | Outcome::Panic(_) => NativeStatus::InternalError as i32,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +366,12 @@ mod tests {
         );
         assert_ne!(model, 0);
         assert_eq!(crate::mmdskin_model_kind(model), 11);
+        let mut summary = [1_u32; 4];
+        assert_eq!(
+            unsafe { crate::mmdskin_model_summary(model, summary.as_mut_ptr(), summary.len()) },
+            NativeStatus::Ok as i32
+        );
+        assert_eq!(summary, [0, 0, 0, 0]);
         assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
         assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
     }
@@ -326,6 +416,33 @@ mod tests {
         );
         assert_ne!(model, 0);
         assert_eq!(crate::mmdskin_model_kind(model), 10);
+        let mut summary = [1_u32; 4];
+        assert_eq!(
+            unsafe { crate::mmdskin_model_summary(model, summary.as_mut_ptr(), summary.len()) },
+            NativeStatus::Ok as i32
+        );
+        assert_eq!(summary, [0, 0, 0, 0]);
+        assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
+        assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
+    }
+
+    #[test]
+    fn model_load_reads_pmx_summary() {
+        let engine = crate::mmdskin_engine_create();
+        let bytes = fs::read(pmx_fixture_path()).unwrap();
+        let path = write_temp_model("fixture.pmx", &bytes);
+        let mut model = 0_u64;
+
+        assert_eq!(
+            unsafe { crate::mmdskin_model_load(engine, path.as_ptr(), path.len(), &mut model) },
+            NativeStatus::Ok as i32
+        );
+        let mut summary = [0_u32; 4];
+        assert_eq!(
+            unsafe { crate::mmdskin_model_summary(model, summary.as_mut_ptr(), summary.len()) },
+            NativeStatus::Ok as i32
+        );
+        assert_eq!(summary, [3, 3, 1, 3]);
         assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
         assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
     }
@@ -415,4 +532,31 @@ mod tests {
             file_name
         ))
     }
+
+    fn pmx_fixture_path() -> PathBuf {
+        let cargo_home = std::env::var_os("CARGO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cargo"));
+        let registry_src = cargo_home.join("registry").join("src");
+        for registry in fs::read_dir(registry_src).unwrap() {
+            let registry = registry.unwrap().path();
+            for package in fs::read_dir(registry).unwrap() {
+                let package = package.unwrap().path();
+                let Some(name) = package.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                if name.starts_with("mmd-anim-format-") {
+                    let path = package
+                        .join("fixtures")
+                        .join("pmx")
+                        .join("ik_multi_axis_limit.pmx");
+                    if path.exists() {
+                        return path;
+                    }
+                }
+            }
+        }
+        panic!("missing mmd-anim-format PMX fixture");
+    }
+
 }

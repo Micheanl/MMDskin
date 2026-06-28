@@ -16,6 +16,8 @@ public final class MMDNative {
 
     private static native int modelKindRaw(long handle);
 
+    private static native int modelSummaryRaw(long handle, long[] outSummary);
+
     public static MMDNativeEngine engineCreate() {
         return new MMDNativeEngine(engineCreateRaw(), MMDNative::engineDestroy);
     }
@@ -39,5 +41,14 @@ public final class MMDNative {
 
     static MMDModelKind modelKind(long handle) {
         return MMDModelKind.fromCode(modelKindRaw(handle));
+    }
+
+    static MMDModelSummary modelSummary(long handle) {
+        long[] summary = new long[4];
+        NativeStatus status = NativeStatus.fromCode(modelSummaryRaw(handle, summary));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native model summary failed: " + status);
+        }
+        return new MMDModelSummary(summary[0], summary[1], summary[2], summary[3]);
     }
 }
