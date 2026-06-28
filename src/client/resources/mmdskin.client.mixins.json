@@ -2,7 +2,10 @@
     "required": true,
     "package": "com.micheanl.model.client.mixin",
     "compatibilityLevel": "JAVA_25",
-    "client": [],
+    "client": [
+        "AvatarRendererMixin",
+        "ItemInHandRendererMixin"
+    ],
     "injectors": {
         "defaultRequire": 1
     },

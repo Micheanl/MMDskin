@@ -1,11 +1,13 @@
 package com.micheanl.model.client;
 
 import com.micheanl.model.client.nativebridge.MMDNativeLibrary;
+import com.micheanl.model.client.render.MMDRenderFeatures;
 import net.fabricmc.api.ClientModInitializer;
 
 public class MMDSkinClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         MMDNativeLibrary.load();
+        MMDRenderFeatures.register();
     }
 }
