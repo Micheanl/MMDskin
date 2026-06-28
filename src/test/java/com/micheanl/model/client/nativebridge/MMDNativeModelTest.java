@@ -22,6 +22,13 @@ final class MMDNativeModelTest {
     }
 
     @Test
+    void exposesModelKind() {
+        try (MMDNativeModel model = new MMDNativeModel(7, handle -> NativeStatus.OK, handle -> MMDModelKind.PMX)) {
+            assertEquals(MMDModelKind.PMX, model.kind());
+        }
+    }
+
+    @Test
     void closesOnlyOnce() {
         AtomicInteger closes = new AtomicInteger();
         MMDNativeModel model = new MMDNativeModel(7, handle -> {

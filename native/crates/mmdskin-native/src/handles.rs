@@ -8,6 +8,13 @@ static MODELS: OnceLock<Mutex<HashMap<u64, ModelHandle>>> = OnceLock::new();
 
 struct ModelHandle {
     engine: u64,
+    kind: ModelKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelKind {
+    Pmd,
+    Pmx,
 }
 
 fn engines() -> &'static Mutex<HashSet<u64>> {
@@ -40,14 +47,19 @@ pub fn engine_exists(handle: u64) -> bool {
     engines.contains(&handle)
 }
 
-pub fn create_model(engine: u64, _path: &str) -> u64 {
+pub fn create_model(engine: u64, kind: ModelKind) -> u64 {
     let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
     let mut models = models().lock().unwrap();
-    models.insert(handle, ModelHandle { engine });
+    models.insert(handle, ModelHandle { engine, kind });
     handle
 }
 
 pub fn destroy_model(handle: u64) -> bool {
     let mut models = models().lock().unwrap();
     models.remove(&handle).is_some()
+}
+
+pub fn model_kind(handle: u64) -> Option<ModelKind> {
+    let models = models().lock().unwrap();
+    models.get(&handle).map(|model| model.kind)
 }

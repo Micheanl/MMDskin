@@ -14,6 +14,8 @@ public final class MMDNative {
 
     private static native int modelDestroyRaw(long handle);
 
+    private static native int modelKindRaw(long handle);
+
     public static MMDNativeEngine engineCreate() {
         return new MMDNativeEngine(engineCreateRaw(), MMDNative::engineDestroy);
     }
@@ -33,5 +35,9 @@ public final class MMDNative {
 
     static NativeStatus modelDestroy(long handle) {
         return NativeStatus.fromCode(modelDestroyRaw(handle));
+    }
+
+    static MMDModelKind modelKind(long handle) {
+        return MMDModelKind.fromCode(modelKindRaw(handle));
     }
 }

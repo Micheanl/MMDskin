@@ -3,7 +3,9 @@ mod status;
 
 use jni::objects::{JClass, JLongArray, JString};
 use jni::{errors::Result as JniResult, EnvUnowned, Outcome};
+use mmd_anim::format::{MmdFormatKind, detect_mmd_format};
 use std::ffi::c_void;
+use std::fs;
 use std::slice;
 use std::str;
 
@@ -48,7 +50,15 @@ pub unsafe extern "C" fn mmdskin_model_load(
     let Ok(path) = str::from_utf8(bytes) else {
         return NativeStatus::InvalidArgument as i32;
     };
-    let model = handles::create_model(engine, path);
+    let Ok(data) = fs::read(path) else {
+        return NativeStatus::NotFound as i32;
+    };
+    let kind = match detect_mmd_format(&data, Some(path)) {
+        MmdFormatKind::Pmd => handles::ModelKind::Pmd,
+        MmdFormatKind::Pmx => handles::ModelKind::Pmx,
+        _ => return NativeStatus::InvalidArgument as i32,
+    };
+    let model = handles::create_model(engine, kind);
     unsafe {
         *out_model = model;
     }
@@ -64,6 +74,18 @@ pub extern "C" fn mmdskin_model_destroy(handle: u64) -> i32 {
         NativeStatus::Ok as i32
     } else {
         NativeStatus::NotFound as i32
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mmdskin_model_kind(handle: u64) -> i32 {
+    if handle == 0 {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    match handles::model_kind(handle) {
+        Some(handles::ModelKind::Pmd) => 10,
+        Some(handles::ModelKind::Pmx) => 11,
+        None => NativeStatus::NotFound as i32,
     }
 }
 
@@ -162,9 +184,24 @@ pub extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_mod
     mmdskin_model_destroy(handle as u64)
 }
 
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_modelKindRaw(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    handle: i64,
+) -> i32 {
+    if handle < 0 {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    mmdskin_model_kind(handle as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn version_is_positive() {
@@ -201,7 +238,7 @@ mod tests {
     #[test]
     fn model_load_rejects_missing_engine() {
         let mut model = 0_u64;
-        let path = b"model.pmx";
+        let path = model_path_bytes("missing-engine.pmx");
 
         assert_eq!(
             unsafe { crate::mmdskin_model_load(999_999, path.as_ptr(), path.len(), &mut model) },
@@ -214,7 +251,7 @@ mod tests {
     fn model_load_rejects_invalid_arguments() {
         let engine = crate::mmdskin_engine_create();
         let mut model = 0_u64;
-        let path = b"model.pmx";
+        let path = model_path_bytes("invalid-args.pmx");
 
         assert_eq!(
             unsafe { crate::mmdskin_model_load(engine, std::ptr::null(), path.len(), &mut model) },
@@ -236,7 +273,7 @@ mod tests {
     #[test]
     fn model_load_creates_model_handle() {
         let engine = crate::mmdskin_engine_create();
-        let path = b"model.pmx";
+        let path = write_temp_model("valid.pmx", b"PMX ");
         let mut model = 0_u64;
 
         assert_eq!(
@@ -244,6 +281,51 @@ mod tests {
             NativeStatus::Ok as i32
         );
         assert_ne!(model, 0);
+        assert_eq!(crate::mmdskin_model_kind(model), 11);
+        assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
+        assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
+    }
+
+    #[test]
+    fn model_load_rejects_missing_file() {
+        let engine = crate::mmdskin_engine_create();
+        let path = model_path_bytes("missing-file.pmx");
+        let mut model = 0_u64;
+
+        assert_eq!(
+            unsafe { crate::mmdskin_model_load(engine, path.as_ptr(), path.len(), &mut model) },
+            NativeStatus::NotFound as i32
+        );
+        assert_eq!(model, 0);
+        assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
+    }
+
+    #[test]
+    fn model_load_rejects_unknown_format() {
+        let engine = crate::mmdskin_engine_create();
+        let path = write_temp_model("unknown.bin", b"not mmd");
+        let mut model = 0_u64;
+
+        assert_eq!(
+            unsafe { crate::mmdskin_model_load(engine, path.as_ptr(), path.len(), &mut model) },
+            NativeStatus::InvalidArgument as i32
+        );
+        assert_eq!(model, 0);
+        assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
+    }
+
+    #[test]
+    fn model_load_accepts_pmd_model_file() {
+        let engine = crate::mmdskin_engine_create();
+        let path = write_temp_model("valid.pmd", b"Pmd");
+        let mut model = 0_u64;
+
+        assert_eq!(
+            unsafe { crate::mmdskin_model_load(engine, path.as_ptr(), path.len(), &mut model) },
+            NativeStatus::Ok as i32
+        );
+        assert_ne!(model, 0);
+        assert_eq!(crate::mmdskin_model_kind(model), 10);
         assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
         assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
     }
@@ -278,7 +360,7 @@ mod tests {
             std::ptr::null_mut(),
             std::ptr::null_mut(),
         );
-        let path = b"model.pmx";
+        let path = write_temp_model("jni.pmx", b"PMX ");
         let mut model = 0_i64;
         assert_eq!(
             unsafe {
@@ -310,5 +392,27 @@ mod tests {
             ),
             NativeStatus::Ok as i32
         );
+    }
+
+    fn model_path_bytes(file_name: &str) -> Vec<u8> {
+        temp_model_path(file_name).to_string_lossy().into_owned().into_bytes()
+    }
+
+    fn write_temp_model(file_name: &str, bytes: &[u8]) -> Vec<u8> {
+        let path = temp_model_path(file_name);
+        fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned().into_bytes()
+    }
+
+    fn temp_model_path(file_name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "mmdskin-native-{}-{}",
+            nonce,
+            file_name
+        ))
     }
 }

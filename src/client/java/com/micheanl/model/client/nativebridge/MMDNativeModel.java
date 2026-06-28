@@ -8,15 +8,26 @@ public final class MMDNativeModel implements AutoCloseable {
         NativeStatus destroy(long handle);
     }
 
+    @FunctionalInterface
+    interface KindReader {
+        MMDModelKind kind(long handle);
+    }
+
     private final Destroyer destroyer;
+    private final KindReader kindReader;
     private long handle;
 
     MMDNativeModel(long handle, Destroyer destroyer) {
+        this(handle, destroyer, MMDNative::modelKind);
+    }
+
+    MMDNativeModel(long handle, Destroyer destroyer, KindReader kindReader) {
         if (handle <= 0) {
             throw new IllegalArgumentException("Invalid native model handle");
         }
         this.handle = handle;
         this.destroyer = Objects.requireNonNull(destroyer, "destroyer");
+        this.kindReader = Objects.requireNonNull(kindReader, "kindReader");
     }
 
     public long handle() {
@@ -25,6 +36,10 @@ public final class MMDNativeModel implements AutoCloseable {
             throw new IllegalStateException("Native model is closed");
         }
         return value;
+    }
+
+    public MMDModelKind kind() {
+        return this.kindReader.kind(handle());
     }
 
     @Override
