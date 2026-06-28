@@ -43,3 +43,4 @@ replay_*.log
 
 native/target/
 native/cpp/build/
+/model_test/
