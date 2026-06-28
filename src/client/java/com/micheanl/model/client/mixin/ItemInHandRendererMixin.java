@@ -28,8 +28,9 @@ abstract class ItemInHandRendererMixin {
         if (!MMDPlayerRenderState.isEnabled()) {
             return;
         }
-        MMDPlayerHandRenderer.submit(poseStack, submitNodeCollector, lightCoords, arm);
-        callbackInfo.cancel();
+        if (MMDPlayerHandRenderer.submit(poseStack, submitNodeCollector, lightCoords, arm)) {
+            callbackInfo.cancel();
+        }
     }
 
     @Inject(method = "renderMapHand", at = @At("HEAD"), cancellable = true)
@@ -45,9 +46,11 @@ abstract class ItemInHandRendererMixin {
         }
         poseStack.pushPose();
         mmdskin$applyMapHandTransform(poseStack, arm);
-        MMDPlayerHandRenderer.submit(poseStack, submitNodeCollector, lightCoords, arm);
+        boolean submitted = MMDPlayerHandRenderer.submit(poseStack, submitNodeCollector, lightCoords, arm);
         poseStack.popPose();
-        callbackInfo.cancel();
+        if (submitted) {
+            callbackInfo.cancel();
+        }
     }
 
     @Unique

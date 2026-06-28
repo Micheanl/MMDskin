@@ -1,16 +1,17 @@
 package com.micheanl.model.client.render;
 
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.feature.FeatureFrameContext;
-import net.minecraft.client.renderer.feature.FeatureRenderer;
+import net.minecraft.client.renderer.feature.RenderTypeFeatureRenderer;
 
 import java.util.List;
 
-public final class MMDPlayerHandFeatureRenderer implements FeatureRenderer<MMDPlayerHandSubmit> {
+public final class MMDPlayerHandFeatureRenderer extends RenderTypeFeatureRenderer<MMDPlayerHandSubmit> {
     @Override
-    public void prepareGroup(FeatureFrameContext context, List<MMDPlayerHandSubmit> submits, boolean strictlyOrdered) {
-    }
-
-    @Override
-    public void executeGroup(FeatureFrameContext context, int groupIndex, List<MMDPlayerHandSubmit> submits, boolean strictlyOrdered) {
+    protected void buildGroup(FeatureFrameContext context, List<MMDPlayerHandSubmit> submits) {
+        VertexConsumer consumer = getVertexBuilder(MMDRenderTypes.model());
+        for (MMDPlayerHandSubmit submit : submits) {
+            MMDMeshEmitter.emit(submit.mesh(), submit.pose(), consumer, submit.transform(), 1.0F);
+        }
     }
 }

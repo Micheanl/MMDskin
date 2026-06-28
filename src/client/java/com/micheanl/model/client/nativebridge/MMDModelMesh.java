@@ -10,6 +10,12 @@ public final class MMDModelMesh {
     private final int[] materialStarts;
     private final int[] materialCounts;
     private final float[] materialAlphas;
+    private final float minX;
+    private final float maxX;
+    private final float minY;
+    private final float maxY;
+    private final float minZ;
+    private final float maxZ;
 
     public MMDModelMesh(
             float[] positions,
@@ -36,10 +42,101 @@ public final class MMDModelMesh {
         if (this.materialStarts.length != this.materialCounts.length || this.materialStarts.length != this.materialAlphas.length) {
             throw new IllegalArgumentException("Invalid model mesh material arrays");
         }
+        float[] bounds = bounds(this.positions);
+        this.minX = bounds[0];
+        this.maxX = bounds[1];
+        this.minY = bounds[2];
+        this.maxY = bounds[3];
+        this.minZ = bounds[4];
+        this.maxZ = bounds[5];
     }
 
     public float[] positions() {
         return this.positions.clone();
+    }
+
+    public int vertexCount() {
+        return this.positions.length / 3;
+    }
+
+    public int indexCount() {
+        return this.indices.length;
+    }
+
+    public int materialCount() {
+        return this.materialStarts.length;
+    }
+
+    public float positionX(int vertex) {
+        return this.positions[vertex * 3];
+    }
+
+    public float positionY(int vertex) {
+        return this.positions[vertex * 3 + 1];
+    }
+
+    public float positionZ(int vertex) {
+        return this.positions[vertex * 3 + 2];
+    }
+
+    public float minX() {
+        return this.minX;
+    }
+
+    public float maxX() {
+        return this.maxX;
+    }
+
+    public float minY() {
+        return this.minY;
+    }
+
+    public float maxY() {
+        return this.maxY;
+    }
+
+    public float minZ() {
+        return this.minZ;
+    }
+
+    public float maxZ() {
+        return this.maxZ;
+    }
+
+    public float normalX(int vertex) {
+        return this.normals[vertex * 3];
+    }
+
+    public float normalY(int vertex) {
+        return this.normals[vertex * 3 + 1];
+    }
+
+    public float normalZ(int vertex) {
+        return this.normals[vertex * 3 + 2];
+    }
+
+    public float u(int vertex) {
+        return this.uvs[vertex * 2];
+    }
+
+    public float v(int vertex) {
+        return this.uvs[vertex * 2 + 1];
+    }
+
+    public int index(int offset) {
+        return this.indices[offset];
+    }
+
+    public int materialStart(int material) {
+        return this.materialStarts[material];
+    }
+
+    public int materialCount(int material) {
+        return this.materialCounts[material];
+    }
+
+    public float materialAlpha(int material) {
+        return this.materialAlphas[material];
     }
 
     public float[] normals() {
@@ -93,5 +190,29 @@ public final class MMDModelMesh {
         result = 31 * result + Arrays.hashCode(this.materialCounts);
         result = 31 * result + Arrays.hashCode(this.materialAlphas);
         return result;
+    }
+
+    private static float[] bounds(float[] positions) {
+        if (positions.length == 0) {
+            return new float[] {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+        }
+        float minX = positions[0];
+        float maxX = minX;
+        float minY = positions[1];
+        float maxY = minY;
+        float minZ = positions[2];
+        float maxZ = minZ;
+        for (int offset = 3; offset < positions.length; offset += 3) {
+            float x = positions[offset];
+            float y = positions[offset + 1];
+            float z = positions[offset + 2];
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+            minZ = Math.min(minZ, z);
+            maxZ = Math.max(maxZ, z);
+        }
+        return new float[] {minX, maxX, minY, maxY, minZ, maxZ};
     }
 }

@@ -1,6 +1,7 @@
 package com.micheanl.model.client;
 
 import com.micheanl.model.client.mmd.MMDModelRuntime;
+import com.micheanl.model.client.mmd.MMDAnimationRuntime;
 import com.micheanl.model.client.nativebridge.MMDNativeLibrary;
 import com.micheanl.model.client.render.MMDRenderFeatures;
 import net.fabricmc.api.ClientModInitializer;
@@ -13,6 +14,7 @@ public class MMDSkinClient implements ClientModInitializer {
         MMDNativeLibrary.load();
         MMDRenderFeatures.register();
         try {
+            MMDAnimationRuntime.installBundledDefaults(MMDSkinClient.class.getClassLoader(), MMDAnimationRuntime.defaultAnimationRoot());
             MMDModelRuntime.instance().reload(MMDModelRuntime.defaultModelRoot());
         } catch (IOException e) {
             throw new IllegalStateException("MMD model load failed", e);

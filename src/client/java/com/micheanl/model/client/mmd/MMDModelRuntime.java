@@ -4,6 +4,7 @@ import com.micheanl.model.client.nativebridge.MMDModelMesh;
 import com.micheanl.model.client.nativebridge.MMDNative;
 import com.micheanl.model.client.nativebridge.MMDNativeEngine;
 import com.micheanl.model.client.nativebridge.MMDNativeModel;
+import com.micheanl.model.client.render.MMDMeshEmitter;
 import com.micheanl.model.client.render.MMDPlayerRenderState;
 import net.fabricmc.loader.api.FabricLoader;
 
@@ -15,9 +16,20 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class MMDModelRuntime implements AutoCloseable {
-    public record LoadedModel(MMDModelMesh mesh, AutoCloseable closeable) implements AutoCloseable {
-        public LoadedModel {
+    public record ModelRenderData(MMDModelMesh mesh, MMDMeshEmitter.Transform transform) {
+        public ModelRenderData {
             Objects.requireNonNull(mesh, "mesh");
+            Objects.requireNonNull(transform, "transform");
+        }
+    }
+
+    public record LoadedModel(ModelRenderData renderData, AutoCloseable closeable) implements AutoCloseable {
+        public LoadedModel(MMDModelMesh mesh, AutoCloseable closeable) {
+            this(new ModelRenderData(mesh, MMDMeshEmitter.Transform.player(mesh)), closeable);
+        }
+
+        public LoadedModel {
+            Objects.requireNonNull(renderData, "renderData");
             Objects.requireNonNull(closeable, "closeable");
         }
 
@@ -81,7 +93,12 @@ public final class MMDModelRuntime implements AutoCloseable {
 
     public Optional<MMDModelMesh> mesh() {
         LoadedModel model = this.loaded;
-        return model == null ? Optional.empty() : Optional.of(model.mesh());
+        return model == null ? Optional.empty() : Optional.of(model.renderData().mesh());
+    }
+
+    public Optional<ModelRenderData> renderData() {
+        LoadedModel model = this.loaded;
+        return model == null ? Optional.empty() : Optional.of(model.renderData());
     }
 
     @Override
