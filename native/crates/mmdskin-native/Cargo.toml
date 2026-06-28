@@ -9,4 +9,5 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+jni = "0.22.4"
 mmd-anim = "0.1.7"

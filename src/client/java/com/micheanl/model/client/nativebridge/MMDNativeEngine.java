@@ -1,5 +1,6 @@
 package com.micheanl.model.client.nativebridge;
 
+import java.nio.file.Path;
 import java.util.Objects;
 
 public final class MMDNativeEngine implements AutoCloseable {
@@ -8,15 +9,28 @@ public final class MMDNativeEngine implements AutoCloseable {
         NativeStatus destroy(long handle);
     }
 
+    @FunctionalInterface
+    interface ModelLoader {
+        long load(long engine, String path);
+    }
+
     private final Destroyer destroyer;
+    private final MMDNativeModel.Destroyer modelDestroyer;
+    private final ModelLoader modelLoader;
     private long handle;
 
     MMDNativeEngine(long handle, Destroyer destroyer) {
+        this(handle, destroyer, MMDNative::modelLoad, MMDNative::modelDestroy);
+    }
+
+    MMDNativeEngine(long handle, Destroyer destroyer, ModelLoader modelLoader, MMDNativeModel.Destroyer modelDestroyer) {
         if (handle <= 0) {
             throw new IllegalArgumentException("Invalid native engine handle");
         }
         this.handle = handle;
         this.destroyer = Objects.requireNonNull(destroyer, "destroyer");
+        this.modelLoader = Objects.requireNonNull(modelLoader, "modelLoader");
+        this.modelDestroyer = Objects.requireNonNull(modelDestroyer, "modelDestroyer");
     }
 
     public long handle() {
@@ -25,6 +39,12 @@ public final class MMDNativeEngine implements AutoCloseable {
             throw new IllegalStateException("Native engine is closed");
         }
         return value;
+    }
+
+    public MMDNativeModel loadModel(Path path) {
+        Objects.requireNonNull(path, "path");
+        long model = this.modelLoader.load(handle(), path.toAbsolutePath().toString());
+        return new MMDNativeModel(model, this.modelDestroyer);
     }
 
     @Override
