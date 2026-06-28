@@ -10,8 +10,8 @@ public final class MMDNative {
 
     private static native int engineDestroyRaw(long handle);
 
-    public static long engineCreate() {
-        return engineCreateRaw();
+    public static MMDNativeEngine engineCreate() {
+        return new MMDNativeEngine(engineCreateRaw(), MMDNative::engineDestroy);
     }
 
     public static NativeStatus engineDestroy(long handle) {
