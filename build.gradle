@@ -33,6 +33,7 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    dependsOn tasks.named("processClientResources")
 }
 
 def nativePlatform = providers.provider {
@@ -58,6 +59,23 @@ def nativeLibraryFile = layout.projectDirectory.file(providers.provider {
     "native/target/release/${nativeLibraryName.get()}"
 })
 
+def imguiVersion = "1.92.8"
+def imguiArchive = layout.buildDirectory.file("downloads/imgui-${imguiVersion}.zip")
+def imguiSourceDir = layout.buildDirectory.dir("third_party/imgui-${imguiVersion}")
+
+def imguiLibraryName = providers.provider {
+    def platform = nativePlatform.get()
+    platform.startsWith("windows-") ? "mmdskin_imgui.dll" : platform.startsWith("macos-") ? "libmmdskin_imgui.dylib" : "libmmdskin_imgui.so"
+}
+
+def imguiBuildDir = layout.buildDirectory.dir(providers.provider {
+    "native-cpp/${nativePlatform.get()}"
+})
+
+def imguiLibraryFile = layout.buildDirectory.file(providers.provider {
+    "native-cpp/${nativePlatform.get()}/${imguiLibraryName.get()}"
+})
+
 tasks.register("buildNativeRust", Exec) {
     workingDir = layout.projectDirectory.dir("native")
     commandLine "cargo", "build", "--release", "--package", "mmdskin-native"
@@ -66,6 +84,53 @@ tasks.register("buildNativeRust", Exec) {
     inputs.file("native/Cargo.toml")
     inputs.file("native/Cargo.lock")
     outputs.file(nativeLibraryFile)
+}
+
+tasks.register("downloadImGui") {
+    outputs.file(imguiArchive)
+    doLast {
+        def target = imguiArchive.get().asFile
+        target.parentFile.mkdirs()
+        if (!target.exists()) {
+            new URI("https://github.com/ocornut/imgui/archive/refs/tags/v${imguiVersion}.zip").toURL().withInputStream { input ->
+                target.withOutputStream { output ->
+                    output << input
+                }
+            }
+        }
+    }
+}
+
+tasks.register("extractImGui", Copy) {
+    dependsOn tasks.named("downloadImGui")
+    from({ zipTree(imguiArchive.get().asFile) })
+    into(layout.buildDirectory.dir("third_party"))
+    outputs.dir(imguiSourceDir)
+}
+
+tasks.register("configureNativeImgui", Exec) {
+    dependsOn tasks.named("extractImGui")
+    def buildDirProvider = imguiBuildDir
+    inputs.files(fileTree("native/cpp/src"))
+    inputs.files(fileTree("native/cpp/include"))
+    inputs.file("native/cpp/CMakeLists.txt")
+    inputs.dir(imguiSourceDir)
+    outputs.file(layout.buildDirectory.file(providers.provider { "native-cpp/${nativePlatform.get()}/CMakeCache.txt" }))
+    environment "JAVA_HOME", System.getProperty("java.home")
+    commandLine "cmake",
+            "-S", "native/cpp",
+            "-B", buildDirProvider.get().asFile.absolutePath,
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DIMGUI_SOURCE_DIR=${imguiSourceDir.get().asFile.absolutePath}"
+}
+
+tasks.register("buildNativeImgui", Exec) {
+    dependsOn tasks.named("configureNativeImgui")
+    inputs.files(fileTree("native/cpp/src"))
+    inputs.files(fileTree("native/cpp/include"))
+    inputs.dir(imguiSourceDir)
+    outputs.file(imguiLibraryFile)
+    commandLine "cmake", "--build", imguiBuildDir.get().asFile.absolutePath, "--config", "Release", "--target", "mmdskin_imgui"
 }
 
 processResources {
@@ -79,7 +144,11 @@ processResources {
 
 processClientResources {
     dependsOn tasks.named("buildNativeRust")
+    dependsOn tasks.named("buildNativeImgui")
     from(nativeLibraryFile) {
+        into "natives/${nativePlatform.get()}"
+    }
+    from(imguiLibraryFile) {
         into "natives/${nativePlatform.get()}"
     }
 }

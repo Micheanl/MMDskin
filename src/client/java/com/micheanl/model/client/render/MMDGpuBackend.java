@@ -7,7 +7,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.opengl.GlDevice;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 
-final class MMDGpuBackend {
+public final class MMDGpuBackend {
     private final Kind kind;
     private final DrawMode drawMode;
     private final boolean persistentMapping;
@@ -18,7 +18,7 @@ final class MMDGpuBackend {
         this.persistentMapping = persistentMapping;
     }
 
-    static MMDGpuBackend current() {
+    public static MMDGpuBackend current() {
         GpuDevice device = RenderSystem.getDevice();
         GpuDeviceBackend backend = device.backend;
         return from(backend, device.getDeviceInfo());
@@ -34,7 +34,7 @@ final class MMDGpuBackend {
         return new MMDGpuBackend(kind, drawMode, info.features().persistentMapping());
     }
 
-    Kind kind() {
+    public Kind kind() {
         return this.kind;
     }
 
@@ -56,7 +56,7 @@ final class MMDGpuBackend {
         return Kind.UNKNOWN;
     }
 
-    enum Kind {
+    public enum Kind {
         OPENGL,
         VULKAN,
         UNKNOWN

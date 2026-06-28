@@ -18,9 +18,13 @@ public final class MMDNativeLibrary {
     }
 
     public static void load() {
+        loadLibrary("mmdskin_native");
+    }
+
+    public static void loadLibrary(String baseName) {
         load(
-                STATE,
-                platformPath(System.getProperty("os.name"), System.getProperty("os.arch")),
+                STATE.state(baseName),
+                platformPath(System.getProperty("os.name"), System.getProperty("os.arch"), baseName),
                 MMDNativeLibrary.class.getClassLoader(),
                 cacheRoot(),
                 System::load
@@ -28,12 +32,16 @@ public final class MMDNativeLibrary {
     }
 
     public static String platformPath(String osName, String osArch) {
+        return platformPath(osName, osArch, "mmdskin_native");
+    }
+
+    public static String platformPath(String osName, String osArch, String baseName) {
         String os = normalizeOs(osName);
         String arch = normalizeArch(osArch);
         String file = switch (os) {
-            case "windows" -> "mmdskin_native.dll";
-            case "linux" -> "libmmdskin_native.so";
-            case "macos" -> "libmmdskin_native.dylib";
+            case "windows" -> baseName + ".dll";
+            case "linux" -> "lib" + baseName + ".so";
+            case "macos" -> "lib" + baseName + ".dylib";
             default -> throw new IllegalArgumentException("Unsupported OS: " + osName);
         };
         return "natives/" + os + "-" + arch + "/" + file;
@@ -81,7 +89,12 @@ public final class MMDNativeLibrary {
     }
 
     static final class State {
+        private final java.util.Map<String, State> children = new java.util.HashMap<>();
         private boolean loaded;
+
+        State state(String name) {
+            return this.children.computeIfAbsent(name, key -> new State());
+        }
     }
 
     private static String normalizeOs(String osName) {

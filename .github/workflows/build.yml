@@ -3,7 +3,12 @@ on: [pull_request, push]
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    name: build-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: checkout repository
         uses: actions/checkout@v6
@@ -14,12 +19,21 @@ jobs:
         with:
           java-version: '25'
           distribution: 'microsoft'
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.87'
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew
+        if: runner.os != 'Windows'
       - name: build
         run: ./gradlew build
+        if: runner.os != 'Windows'
+      - name: build
+        run: .\gradlew.bat build
+        if: runner.os == 'Windows'
       - name: capture build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: Artifacts
+          name: Artifacts-${{ runner.os }}
           path: build/libs/
