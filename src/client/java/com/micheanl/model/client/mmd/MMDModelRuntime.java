@@ -1,6 +1,7 @@
 package com.micheanl.model.client.mmd;
 
 import com.micheanl.model.client.nativebridge.MMDModelMesh;
+import com.micheanl.model.client.nativebridge.MMDModelSkeleton;
 import com.micheanl.model.client.nativebridge.MMDNative;
 import com.micheanl.model.client.nativebridge.MMDNativeEngine;
 import com.micheanl.model.client.nativebridge.MMDNativeModel;
@@ -16,16 +17,17 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class MMDModelRuntime implements AutoCloseable {
-    public record ModelRenderData(MMDModelMesh mesh, MMDMeshEmitter.Transform transform) {
+    public record ModelRenderData(MMDModelMesh mesh, MMDModelSkeleton skeleton, MMDMeshEmitter.Transform transform) {
         public ModelRenderData {
             Objects.requireNonNull(mesh, "mesh");
+            Objects.requireNonNull(skeleton, "skeleton");
             Objects.requireNonNull(transform, "transform");
         }
     }
 
     public record LoadedModel(ModelRenderData renderData, AutoCloseable closeable) implements AutoCloseable {
-        public LoadedModel(MMDModelMesh mesh, AutoCloseable closeable) {
-            this(new ModelRenderData(mesh, MMDMeshEmitter.Transform.player(mesh)), closeable);
+        public LoadedModel(MMDModelMesh mesh, MMDModelSkeleton skeleton, AutoCloseable closeable) {
+            this(new ModelRenderData(mesh, skeleton, MMDMeshEmitter.Transform.player(mesh)), closeable);
         }
 
         public LoadedModel {
@@ -45,6 +47,11 @@ public final class MMDModelRuntime implements AutoCloseable {
     }
 
     @FunctionalInterface
+    public interface AnimationIndexer {
+        List<MMDAnimationRuntime.AnimationEntry> index(Path root) throws IOException;
+    }
+
+    @FunctionalInterface
     public interface LoaderFactory {
         ModelLoader create();
     }
@@ -54,25 +61,28 @@ public final class MMDModelRuntime implements AutoCloseable {
         LoadedModel load(Path path);
     }
 
-    private static final MMDModelRuntime INSTANCE = new MMDModelRuntime(
-            ModelIndexer::index,
-            NativeModelLoader::new,
-            MMDPlayerRenderState::setEnabled
-    );
-
     private final Indexer indexer;
+    private final AnimationIndexer animationIndexer;
     private final LoaderFactory loaderFactory;
     private final Consumer<Boolean> enabledSink;
+    private final Path animationRoot;
     private LoadedModel loaded;
+    private List<MMDAnimationRuntime.AnimationEntry> animations = List.of();
 
-    public MMDModelRuntime(Indexer indexer, LoaderFactory loaderFactory, Consumer<Boolean> enabledSink) {
+    public MMDModelRuntime(Indexer indexer, AnimationIndexer animationIndexer, LoaderFactory loaderFactory, Consumer<Boolean> enabledSink) {
+        this(indexer, animationIndexer, loaderFactory, enabledSink, Path.of("animations"));
+    }
+
+    public MMDModelRuntime(Indexer indexer, AnimationIndexer animationIndexer, LoaderFactory loaderFactory, Consumer<Boolean> enabledSink, Path animationRoot) {
         this.indexer = Objects.requireNonNull(indexer, "indexer");
+        this.animationIndexer = Objects.requireNonNull(animationIndexer, "animationIndexer");
         this.loaderFactory = Objects.requireNonNull(loaderFactory, "loaderFactory");
         this.enabledSink = Objects.requireNonNull(enabledSink, "enabledSink");
+        this.animationRoot = Objects.requireNonNull(animationRoot, "animationRoot");
     }
 
     public static MMDModelRuntime instance() {
-        return INSTANCE;
+        return Holder.INSTANCE;
     }
 
     public static Path defaultModelRoot() {
@@ -81,6 +91,7 @@ public final class MMDModelRuntime implements AutoCloseable {
 
     public void reload(Path root) throws IOException {
         closeLoaded();
+        this.animations = this.animationIndexer.index(this.animationRoot);
         List<ModelIndexEntry> models = this.indexer.index(root);
         if (models.isEmpty()) {
             this.enabledSink.accept(false);
@@ -99,6 +110,16 @@ public final class MMDModelRuntime implements AutoCloseable {
     public Optional<ModelRenderData> renderData() {
         LoadedModel model = this.loaded;
         return model == null ? Optional.empty() : Optional.of(model.renderData());
+    }
+
+    public List<MMDAnimationRuntime.AnimationEntry> animations() {
+        return this.animations;
+    }
+
+    public Optional<MMDAnimationRuntime.AnimationEntry> animation(MMDPlayerAction action) {
+        return this.animations.stream()
+                .filter(entry -> entry.action() == action)
+                .findFirst();
     }
 
     @Override
@@ -125,10 +146,20 @@ public final class MMDModelRuntime implements AutoCloseable {
         public LoadedModel load(Path path) {
             MMDNativeEngine engine = MMDNative.engineCreate();
             MMDNativeModel model = engine.loadModel(path);
-            return new LoadedModel(model.mesh(), () -> {
+            return new LoadedModel(model.mesh(), model.skeleton(), () -> {
                 model.close();
                 engine.close();
             });
         }
+    }
+
+    private static final class Holder {
+        private static final MMDModelRuntime INSTANCE = new MMDModelRuntime(
+                ModelIndexer::index,
+                MMDAnimationRuntime::index,
+                NativeModelLoader::new,
+                MMDPlayerRenderState::setEnabled,
+                MMDAnimationRuntime.defaultAnimationRoot()
+        );
     }
 }

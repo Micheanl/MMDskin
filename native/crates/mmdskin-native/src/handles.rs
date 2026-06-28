@@ -11,6 +11,7 @@ struct ModelHandle {
     kind: ModelKind,
     summary: ModelSummary,
     mesh: ModelMesh,
+    skeleton: ModelSkeleton,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -36,6 +37,14 @@ pub struct ModelMesh {
     pub material_starts: Vec<u32>,
     pub material_counts: Vec<u32>,
     pub material_alphas: Vec<f32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ModelSkeleton {
+    pub parent_indices: Vec<i32>,
+    pub positions: Vec<f32>,
+    pub skin_indices: Vec<u32>,
+    pub skin_weights: Vec<f32>,
 }
 
 fn engines() -> &'static Mutex<HashSet<u64>> {
@@ -68,7 +77,13 @@ pub fn engine_exists(handle: u64) -> bool {
     engines.contains(&handle)
 }
 
-pub fn create_model(engine: u64, kind: ModelKind, summary: ModelSummary, mesh: ModelMesh) -> u64 {
+pub fn create_model(
+    engine: u64,
+    kind: ModelKind,
+    summary: ModelSummary,
+    mesh: ModelMesh,
+    skeleton: ModelSkeleton,
+) -> u64 {
     let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
     let mut models = models().lock().unwrap();
     models.insert(
@@ -78,6 +93,7 @@ pub fn create_model(engine: u64, kind: ModelKind, summary: ModelSummary, mesh: M
             kind,
             summary,
             mesh,
+            skeleton,
         },
     );
     handle
@@ -101,4 +117,9 @@ pub fn model_summary(handle: u64) -> Option<ModelSummary> {
 pub fn model_mesh(handle: u64) -> Option<ModelMesh> {
     let models = models().lock().unwrap();
     models.get(&handle).map(|model| model.mesh.clone())
+}
+
+pub fn model_skeleton(handle: u64) -> Option<ModelSkeleton> {
+    let models = models().lock().unwrap();
+    models.get(&handle).map(|model| model.skeleton.clone())
 }

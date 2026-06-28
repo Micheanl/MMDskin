@@ -28,14 +28,29 @@ final class MMDAnimationRuntimeTest {
 
         List<MMDAnimationRuntime.AnimationEntry> entries = MMDAnimationRuntime.extractDefaultAnimations(
                 new ByteArrayInputStream(zip),
-                tempDir
+                tempDir,
+                path -> new com.micheanl.model.client.nativebridge.MMDAnimationSummary(1, 1, 0, 0, 0, 0, 0)
         );
 
         assertEquals(2, entries.size());
         assertEquals("idle", entries.get(0).name());
         assertEquals("walk", entries.get(1).name());
+        assertEquals(MMDPlayerAction.IDLE, entries.get(0).action());
+        assertEquals(MMDPlayerAction.WALK, entries.get(1).action());
         assertTrue(Files.exists(tempDir.resolve("idle.vmd")));
         assertTrue(Files.exists(tempDir.resolve("walk.vmd")));
+    }
+
+    @Test
+    void indexesAnimationSummaries() throws Exception {
+        Files.write(tempDir.resolve("idle.vmd"), new byte[] {1, 2, 3});
+
+        MMDAnimationRuntime.AnimationEntry entry = MMDAnimationRuntime.index(
+                tempDir,
+                path -> new com.micheanl.model.client.nativebridge.MMDAnimationSummary(12, 3, 2, 1, 0, 0, 0)
+        ).getFirst();
+
+        assertEquals(12, entry.summary().maxFrame());
     }
 
     private static ZipEntryData entry(String name, byte[] bytes) {

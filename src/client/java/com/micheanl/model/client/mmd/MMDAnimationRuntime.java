@@ -1,5 +1,7 @@
 package com.micheanl.model.client.mmd;
 
+import com.micheanl.model.client.nativebridge.MMDAnimationSummary;
+import com.micheanl.model.client.nativebridge.MMDNative;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -16,10 +18,17 @@ import java.util.zip.ZipInputStream;
 public final class MMDAnimationRuntime {
     public static final String DEFAULT_ANIMATION_RESOURCE = "/assets/mmdskin/animations/default-animation.zip";
 
-    public record AnimationEntry(String name, Path path) {
+    @FunctionalInterface
+    public interface SummaryReader {
+        MMDAnimationSummary read(Path path);
+    }
+
+    public record AnimationEntry(String name, Path path, MMDAnimationSummary summary, MMDPlayerAction action) {
         public AnimationEntry {
             Objects.requireNonNull(name, "name");
             Objects.requireNonNull(path, "path");
+            Objects.requireNonNull(summary, "summary");
+            Objects.requireNonNull(action, "action");
         }
     }
 
@@ -31,15 +40,23 @@ public final class MMDAnimationRuntime {
     }
 
     public static List<AnimationEntry> installBundledDefaults(ClassLoader loader, Path target) throws IOException {
+        return installBundledDefaults(loader, target, MMDNative::animationSummary);
+    }
+
+    public static List<AnimationEntry> installBundledDefaults(ClassLoader loader, Path target, SummaryReader summaryReader) throws IOException {
         try (InputStream input = loader.getResourceAsStream(DEFAULT_ANIMATION_RESOURCE.substring(1))) {
             if (input == null) {
                 return List.of();
             }
-            return extractDefaultAnimations(input, target);
+            return extractDefaultAnimations(input, target, summaryReader);
         }
     }
 
     public static List<AnimationEntry> extractDefaultAnimations(InputStream input, Path target) throws IOException {
+        return extractDefaultAnimations(input, target, MMDNative::animationSummary);
+    }
+
+    public static List<AnimationEntry> extractDefaultAnimations(InputStream input, Path target, SummaryReader summaryReader) throws IOException {
         Files.createDirectories(target);
         try (ZipInputStream zip = new ZipInputStream(input)) {
             ZipEntry entry = zip.getNextEntry();
@@ -56,10 +73,15 @@ public final class MMDAnimationRuntime {
                 entry = zip.getNextEntry();
             }
         }
-        return index(target);
+        return index(target, summaryReader);
     }
 
     public static List<AnimationEntry> index(Path target) throws IOException {
+        return index(target, MMDNative::animationSummary);
+    }
+
+    public static List<AnimationEntry> index(Path target, SummaryReader summaryReader) throws IOException {
+        Objects.requireNonNull(summaryReader, "summaryReader");
         if (!Files.isDirectory(target)) {
             return List.of();
         }
@@ -68,9 +90,14 @@ public final class MMDAnimationRuntime {
                     .filter(Files::isRegularFile)
                     .filter(path -> isVmd(path.getFileName().toString()))
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                    .map(path -> new AnimationEntry(animationName(path.getFileName().toString()), path))
+                    .map(path -> entry(path, summaryReader))
                     .toList();
         }
+    }
+
+    private static AnimationEntry entry(Path path, SummaryReader summaryReader) {
+        String name = animationName(path.getFileName().toString());
+        return new AnimationEntry(name, path, summaryReader.read(path), MMDPlayerAction.fromAnimationName(name));
     }
 
     private static boolean isVmd(String name) {

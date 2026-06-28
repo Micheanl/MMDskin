@@ -1,6 +1,7 @@
 package com.micheanl.model.client.mixin;
 
 import com.micheanl.model.client.mmd.MMDModelRuntime;
+import com.micheanl.model.client.mmd.MMDPlayerAnimationSelector;
 import com.micheanl.model.client.render.MMDMeshEmitter;
 import com.micheanl.model.client.render.MMDPlayerRenderState;
 import com.micheanl.model.client.render.MMDPlayerSubmit;
@@ -51,9 +52,16 @@ abstract class AvatarRendererMixin {
             submitVanilla(collector, model, modelState, poseStack, renderType, lightCoords, overlayCoords, tintedColor, sprite, outlineColor, crumblingOverlay);
             return;
         }
+        AvatarRenderState avatarState = (AvatarRenderState) modelState;
         ((FabricOrderedSubmitNodeCollector) collector).submitCustom(
                 SubmitRenderPhases.SOLID,
-                new MMDPlayerSubmit(poseStack.last(), data.get().mesh(), data.get().transform(), alpha(tintedColor))
+                new MMDPlayerSubmit(
+                        poseStack.last(),
+                        data.get().mesh(),
+                        data.get().transform(),
+                        alpha(tintedColor),
+                        MMDPlayerAnimationSelector.select(avatarState, MMDModelRuntime.instance().animations()).orElse(null)
+                )
         );
         if (outlineColor != 0) {
             submitVanilla(collector, model, modelState, poseStack, renderType, lightCoords, overlayCoords, tintedColor, sprite, outlineColor, crumblingOverlay);

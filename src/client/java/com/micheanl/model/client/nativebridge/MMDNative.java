@@ -31,6 +31,18 @@ public final class MMDNative {
             float[] materialAlphas
     );
 
+    private static native int modelSkeletonCountsRaw(long handle, long[] outCounts);
+
+    private static native int modelSkeletonReadRaw(
+            long handle,
+            int[] parentIndices,
+            float[] positions,
+            int[] skinIndices,
+            float[] skinWeights
+    );
+
+    private static native int animationSummaryRaw(String path, long[] outSummary);
+
     public static MMDNativeEngine engineCreate() {
         return new MMDNativeEngine(engineCreateRaw(), MMDNative::engineDestroy);
     }
@@ -92,6 +104,32 @@ public final class MMDNative {
             throw new IllegalStateException("Native model mesh read failed: " + status);
         }
         return new MMDModelMesh(positions, normals, uvs, indices, materialStarts, materialCounts, materialAlphas);
+    }
+
+    static MMDModelSkeleton modelSkeleton(long handle) {
+        long[] counts = new long[4];
+        NativeStatus status = NativeStatus.fromCode(modelSkeletonCountsRaw(handle, counts));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native model skeleton counts failed: " + status);
+        }
+        int[] parentIndices = new int[checkedArrayLength(counts[0])];
+        float[] positions = new float[checkedArrayLength(counts[1])];
+        int[] skinIndices = new int[checkedArrayLength(counts[2])];
+        float[] skinWeights = new float[checkedArrayLength(counts[3])];
+        status = NativeStatus.fromCode(modelSkeletonReadRaw(handle, parentIndices, positions, skinIndices, skinWeights));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native model skeleton read failed: " + status);
+        }
+        return new MMDModelSkeleton(parentIndices, positions, skinIndices, skinWeights);
+    }
+
+    public static MMDAnimationSummary animationSummary(java.nio.file.Path path) {
+        long[] summary = new long[7];
+        NativeStatus status = NativeStatus.fromCode(animationSummaryRaw(path.toAbsolutePath().toString(), summary));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native animation summary failed: " + status);
+        }
+        return new MMDAnimationSummary(summary[0], summary[1], summary[2], summary[3], summary[4], summary[5], summary[6]);
     }
 
     private static int checkedArrayLength(long value) {

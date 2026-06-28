@@ -23,10 +23,16 @@ public final class MMDNativeModel implements AutoCloseable {
         MMDModelMesh mesh(long handle);
     }
 
+    @FunctionalInterface
+    interface SkeletonReader {
+        MMDModelSkeleton skeleton(long handle);
+    }
+
     private final Destroyer destroyer;
     private final KindReader kindReader;
     private final SummaryReader summaryReader;
     private final MeshReader meshReader;
+    private final SkeletonReader skeletonReader;
     private long handle;
 
     MMDNativeModel(long handle, Destroyer destroyer) {
@@ -42,6 +48,10 @@ public final class MMDNativeModel implements AutoCloseable {
     }
 
     MMDNativeModel(long handle, Destroyer destroyer, KindReader kindReader, SummaryReader summaryReader, MeshReader meshReader) {
+        this(handle, destroyer, kindReader, summaryReader, meshReader, MMDNative::modelSkeleton);
+    }
+
+    MMDNativeModel(long handle, Destroyer destroyer, KindReader kindReader, SummaryReader summaryReader, MeshReader meshReader, SkeletonReader skeletonReader) {
         if (handle <= 0) {
             throw new IllegalArgumentException("Invalid native model handle");
         }
@@ -50,6 +60,7 @@ public final class MMDNativeModel implements AutoCloseable {
         this.kindReader = Objects.requireNonNull(kindReader, "kindReader");
         this.summaryReader = Objects.requireNonNull(summaryReader, "summaryReader");
         this.meshReader = Objects.requireNonNull(meshReader, "meshReader");
+        this.skeletonReader = Objects.requireNonNull(skeletonReader, "skeletonReader");
     }
 
     public long handle() {
@@ -70,6 +81,10 @@ public final class MMDNativeModel implements AutoCloseable {
 
     public MMDModelMesh mesh() {
         return this.meshReader.mesh(handle());
+    }
+
+    public MMDModelSkeleton skeleton() {
+        return this.skeletonReader.skeleton(handle());
     }
 
     @Override
