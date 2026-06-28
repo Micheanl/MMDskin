@@ -2,6 +2,7 @@ package com.micheanl.model.client.mixin;
 
 import com.micheanl.model.client.mmd.MMDModelRuntime;
 import com.micheanl.model.client.mmd.MMDPlayerAnimationSelector;
+import com.micheanl.model.client.mmd.MMDAnimationRuntime;
 import com.micheanl.model.client.render.MMDMeshEmitter;
 import com.micheanl.model.client.render.MMDPlayerRenderState;
 import com.micheanl.model.client.render.MMDPlayerSubmit;
@@ -47,20 +48,24 @@ abstract class AvatarRendererMixin {
             submitVanilla(collector, model, modelState, poseStack, renderType, lightCoords, overlayCoords, tintedColor, sprite, outlineColor, crumblingOverlay);
             return;
         }
-        Optional<MMDModelRuntime.ModelRenderData> data = MMDModelRuntime.instance().renderData();
+        MMDModelRuntime runtime = MMDModelRuntime.instance();
+        Optional<MMDModelRuntime.ModelRenderData> data = runtime.renderData();
         if (data.isEmpty()) {
             submitVanilla(collector, model, modelState, poseStack, renderType, lightCoords, overlayCoords, tintedColor, sprite, outlineColor, crumblingOverlay);
             return;
         }
         AvatarRenderState avatarState = (AvatarRenderState) modelState;
+        MMDAnimationRuntime.AnimationEntry animation = MMDPlayerAnimationSelector.select(avatarState, runtime.animations()).orElse(null);
         ((FabricOrderedSubmitNodeCollector) collector).submitCustom(
                 SubmitRenderPhases.SOLID,
                 new MMDPlayerSubmit(
                         poseStack.last(),
                         data.get().mesh(),
+                        data.get().skeleton(),
+                        runtime.sample(animation, avatarState.ageInTicks),
                         data.get().transform(),
                         alpha(tintedColor),
-                        MMDPlayerAnimationSelector.select(avatarState, MMDModelRuntime.instance().animations()).orElse(null)
+                        animation
                 )
         );
         if (outlineColor != 0) {

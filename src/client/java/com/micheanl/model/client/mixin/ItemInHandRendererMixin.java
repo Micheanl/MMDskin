@@ -28,7 +28,7 @@ abstract class ItemInHandRendererMixin {
         if (!MMDPlayerRenderState.isEnabled()) {
             return;
         }
-        if (MMDPlayerHandRenderer.submit(poseStack, submitNodeCollector, lightCoords, arm)) {
+        if (MMDPlayerHandRenderer.submit(poseStack, submitNodeCollector, lightCoords, arm, attackValue)) {
             callbackInfo.cancel();
         }
     }

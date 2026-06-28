@@ -16,6 +16,8 @@ public final class MMDNativeEngine implements AutoCloseable {
 
     private final Destroyer destroyer;
     private final MMDNativeModel.Destroyer modelDestroyer;
+    private final MMDNativeModel.AnimationLoader animationLoader;
+    private final MMDAnimationClip.Destroyer animationDestroyer;
     private final ModelLoader modelLoader;
     private long handle;
 
@@ -24,6 +26,17 @@ public final class MMDNativeEngine implements AutoCloseable {
     }
 
     MMDNativeEngine(long handle, Destroyer destroyer, ModelLoader modelLoader, MMDNativeModel.Destroyer modelDestroyer) {
+        this(handle, destroyer, modelLoader, modelDestroyer, MMDNative::animationLoad, MMDNative::animationDestroy);
+    }
+
+    MMDNativeEngine(
+            long handle,
+            Destroyer destroyer,
+            ModelLoader modelLoader,
+            MMDNativeModel.Destroyer modelDestroyer,
+            MMDNativeModel.AnimationLoader animationLoader,
+            MMDAnimationClip.Destroyer animationDestroyer
+    ) {
         if (handle <= 0) {
             throw new IllegalArgumentException("Invalid native engine handle");
         }
@@ -31,6 +44,8 @@ public final class MMDNativeEngine implements AutoCloseable {
         this.destroyer = Objects.requireNonNull(destroyer, "destroyer");
         this.modelLoader = Objects.requireNonNull(modelLoader, "modelLoader");
         this.modelDestroyer = Objects.requireNonNull(modelDestroyer, "modelDestroyer");
+        this.animationLoader = Objects.requireNonNull(animationLoader, "animationLoader");
+        this.animationDestroyer = Objects.requireNonNull(animationDestroyer, "animationDestroyer");
     }
 
     public long handle() {
@@ -44,7 +59,7 @@ public final class MMDNativeEngine implements AutoCloseable {
     public MMDNativeModel loadModel(Path path) {
         Objects.requireNonNull(path, "path");
         long model = this.modelLoader.load(handle(), path.toAbsolutePath().toString());
-        return new MMDNativeModel(model, this.modelDestroyer);
+        return new MMDNativeModel(model, this.modelDestroyer, this.animationLoader, this.animationDestroyer);
     }
 
     @Override

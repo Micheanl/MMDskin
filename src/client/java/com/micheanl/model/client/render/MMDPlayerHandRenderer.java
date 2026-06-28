@@ -17,14 +17,29 @@ public final class MMDPlayerHandRenderer {
     }
 
     public static boolean submit(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int lightCoords, HumanoidArm arm) {
-        Optional<MMDModelRuntime.ModelRenderData> data = MMDModelRuntime.instance().renderData();
+        return submit(poseStack, submitNodeCollector, lightCoords, arm, 0.0F);
+    }
+
+    public static boolean submit(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int lightCoords, HumanoidArm arm, float attackValue) {
+        MMDModelRuntime runtime = MMDModelRuntime.instance();
+        Optional<MMDModelRuntime.ModelRenderData> data = runtime.renderData();
         if (data.isEmpty()) {
             return false;
         }
-        MMDAnimationRuntime.AnimationEntry animation = MMDModelRuntime.instance().animation(arm == HumanoidArm.LEFT ? MMDPlayerAction.SWING_LEFT : MMDPlayerAction.SWING_RIGHT).orElse(null);
+        MMDAnimationRuntime.AnimationEntry animation = runtime.animation(arm == HumanoidArm.LEFT ? MMDPlayerAction.SWING_LEFT : MMDPlayerAction.SWING_RIGHT).orElse(null);
+        float frame = animation == null ? 0.0F : attackValue * animation.summary().maxFrame();
         ((FabricOrderedSubmitNodeCollector) submitNodeCollector).submitCustom(
                 SubmitRenderPhases.SOLID,
-                new MMDPlayerHandSubmit(new Matrix4f(poseStack.last().pose()), data.get().mesh(), data.get().transform(), arm, lightCoords, animation)
+                new MMDPlayerHandSubmit(
+                        new Matrix4f(poseStack.last().pose()),
+                        data.get().mesh(),
+                        data.get().skeleton(),
+                        runtime.sample(animation, frame),
+                        data.get().transform(),
+                        arm,
+                        lightCoords,
+                        animation
+                )
         );
         return true;
     }

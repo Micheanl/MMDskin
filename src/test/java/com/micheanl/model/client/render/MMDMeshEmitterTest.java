@@ -1,6 +1,8 @@
 package com.micheanl.model.client.render;
 
 import com.micheanl.model.client.nativebridge.MMDModelMesh;
+import com.micheanl.model.client.nativebridge.MMDModelSkeleton;
+import com.micheanl.model.client.nativebridge.MMDSampledPose;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import org.joml.Matrix4f;
 import org.junit.jupiter.api.Test;
@@ -75,6 +77,56 @@ final class MMDMeshEmitterTest {
         assertEquals(0.9F, consumer.vertices.get(0).y);
         assertEquals(0.0F, consumer.vertices.get(0).z);
         assertEquals(102, consumer.vertices.get(0).alpha);
+    }
+
+    @Test
+    void emitsSkinnedVerticesWhenPoseIsAvailable() {
+        MMDModelMesh mesh = new MMDModelMesh(
+                new float[] {
+                        0.0F, 0.0F, 0.0F,
+                        0.0F, 0.0F, 0.0F,
+                        0.0F, 0.0F, 0.0F
+                },
+                new float[] {
+                        0.0F, 1.0F, 0.0F,
+                        0.0F, 1.0F, 0.0F,
+                        0.0F, 1.0F, 0.0F
+                },
+                new float[] {
+                        0.0F, 0.0F,
+                        0.0F, 0.0F,
+                        0.0F, 0.0F
+                },
+                new int[] {0, 1, 2},
+                new int[] {0},
+                new int[] {3},
+                new float[] {1.0F}
+        );
+        MMDModelSkeleton skeleton = new MMDModelSkeleton(
+                new int[] {-1},
+                new float[] {0.0F, 0.0F, 0.0F},
+                new int[] {
+                        0, 0, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0
+                },
+                new float[] {
+                        1.0F, 0.0F, 0.0F, 0.0F,
+                        1.0F, 0.0F, 0.0F, 0.0F,
+                        1.0F, 0.0F, 0.0F, 0.0F
+                }
+        );
+        MMDSampledPose sampledPose = new MMDSampledPose(new float[] {
+                1.0F, 0.0F, 0.0F, 0.0F,
+                0.0F, 1.0F, 0.0F, 0.0F,
+                0.0F, 0.0F, 1.0F, 0.0F,
+                2.0F, 0.0F, 0.0F, 1.0F
+        });
+        CapturingVertexConsumer consumer = new CapturingVertexConsumer();
+
+        MMDMeshEmitter.emit(mesh, skeleton, sampledPose, new Matrix4f(), consumer, MMDMeshEmitter.Transform.player(mesh), 1.0F);
+
+        assertEquals(2.0F, consumer.vertices.getFirst().x);
     }
 
     private static final class CapturingVertexConsumer implements VertexConsumer {

@@ -4,7 +4,8 @@ mod status;
 use jni::objects::{JClass, JFloatArray, JIntArray, JLongArray, JString};
 use jni::{errors::Result as JniResult, EnvUnowned, Outcome};
 use mmd_anim::format::{
-    MmdFormatKind, detect_mmd_format, parse_pmd_model, parse_pmx_model, parse_vmd_animation,
+    MmdFormatKind, build_pair_clip, detect_mmd_format, import_pmd_runtime, import_pmx_runtime,
+    import_vmd_motion, parse_pmd_model, parse_pmx_model, parse_vmd_animation,
 };
 use std::ffi::c_void;
 use std::fs;
@@ -55,38 +56,42 @@ pub unsafe extern "C" fn mmdskin_model_load(
     let Ok(data) = fs::read(path) else {
         return NativeStatus::NotFound as i32;
     };
-    let (kind, summary, mesh, skeleton) = match detect_mmd_format(&data, Some(path)) {
+    let data = match detect_mmd_format(&data, Some(path)) {
         MmdFormatKind::Pmd => match parse_pmd_model(&data) {
-            Ok(model) => (
-                handles::ModelKind::Pmd,
-                pmd_summary(&model),
-                pmd_mesh(&model),
-                pmd_skeleton(&model),
-            ),
-            Err(_) => (
-                handles::ModelKind::Pmd,
-                handles::ModelSummary::default(),
-                handles::ModelMesh::default(),
-                handles::ModelSkeleton::default(),
-            ),
+            Ok(model) => handles::LoadedModelData {
+                kind: handles::ModelKind::Pmd,
+                summary: pmd_summary(&model),
+                mesh: pmd_mesh(&model),
+                skeleton: pmd_skeleton(&model),
+                runtime: import_pmd_runtime(&data).ok().map(handles::pmd_runtime),
+            },
+            Err(_) => handles::LoadedModelData {
+                kind: handles::ModelKind::Pmd,
+                summary: handles::ModelSummary::default(),
+                mesh: handles::ModelMesh::default(),
+                skeleton: handles::ModelSkeleton::default(),
+                runtime: None,
+            },
         },
         MmdFormatKind::Pmx => match parse_pmx_model(&data) {
-            Ok(model) => (
-                handles::ModelKind::Pmx,
-                pmx_summary(&model),
-                pmx_mesh(&model),
-                pmx_skeleton(&model),
-            ),
-            Err(_) => (
-                handles::ModelKind::Pmx,
-                handles::ModelSummary::default(),
-                handles::ModelMesh::default(),
-                handles::ModelSkeleton::default(),
-            ),
+            Ok(model) => handles::LoadedModelData {
+                kind: handles::ModelKind::Pmx,
+                summary: pmx_summary(&model),
+                mesh: pmx_mesh(&model),
+                skeleton: pmx_skeleton(&model),
+                runtime: import_pmx_runtime(&data).ok().map(handles::pmx_runtime),
+            },
+            Err(_) => handles::LoadedModelData {
+                kind: handles::ModelKind::Pmx,
+                summary: handles::ModelSummary::default(),
+                mesh: handles::ModelMesh::default(),
+                skeleton: handles::ModelSkeleton::default(),
+                runtime: None,
+            },
         },
         _ => return NativeStatus::InvalidArgument as i32,
     };
-    let model = handles::create_model(engine, kind, summary, mesh, skeleton);
+    let model = handles::create_model(engine, data);
     unsafe {
         *out_model = model;
     }
@@ -432,6 +437,91 @@ pub unsafe extern "C" fn mmdskin_animation_summary(
     out[5] = animation.metadata.counts.self_shadows as u32;
     out[6] = animation.metadata.counts.properties as u32;
     NativeStatus::Ok as i32
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmdskin_animation_load(
+    model: u64,
+    path: *const u8,
+    path_len: usize,
+    out_animation: *mut u64,
+) -> i32 {
+    if model == 0 || path.is_null() || path_len == 0 || out_animation.is_null() {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    let bytes = unsafe { slice::from_raw_parts(path, path_len) };
+    let Ok(path) = str::from_utf8(bytes) else {
+        return NativeStatus::InvalidArgument as i32;
+    };
+    let Ok(data) = fs::read(path) else {
+        return NativeStatus::NotFound as i32;
+    };
+    if detect_mmd_format(&data, Some(path)) != MmdFormatKind::Vmd {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    let Ok(import) = import_vmd_motion(&data) else {
+        return NativeStatus::InvalidArgument as i32;
+    };
+    let Some(clip) = handles::with_model_runtime(model, |runtime| {
+        build_pair_clip(
+            &import,
+            runtime.bone_name_to_index(),
+            runtime.morph_name_to_index(),
+            runtime.ik_solver_bone_name_to_index(),
+            runtime.solver_count(),
+        )
+    }) else {
+        return NativeStatus::NotFound as i32;
+    };
+    let Some(animation) = handles::create_animation(model, clip) else {
+        return NativeStatus::NotFound as i32;
+    };
+    unsafe {
+        *out_animation = animation;
+    }
+    NativeStatus::Ok as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mmdskin_animation_destroy(handle: u64) -> i32 {
+    if handle == 0 {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    if handles::destroy_animation(handle) {
+        NativeStatus::Ok as i32
+    } else {
+        NativeStatus::NotFound as i32
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmdskin_animation_sample(
+    handle: u64,
+    frame: f32,
+    out_skinning_matrices: *mut f32,
+    out_skinning_matrices_len: usize,
+) -> i32 {
+    if handle == 0 || !frame.is_finite() || out_skinning_matrices.is_null() {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    let Some(status) = handles::with_animation_mut(handle, |animation| {
+        let bone_count = animation.runtime.model().bone_count();
+        let required = bone_count.saturating_mul(16);
+        if out_skinning_matrices_len < required {
+            return NativeStatus::InvalidArgument as i32;
+        }
+        animation.runtime.evaluate_clip_frame(&animation.clip, frame);
+        let matrices = animation.runtime.skinning_matrices();
+        let out = unsafe { slice::from_raw_parts_mut(out_skinning_matrices, required) };
+        for (bone, matrix) in matrices.iter().enumerate() {
+            let start = bone * 16;
+            out[start..start + 16].copy_from_slice(&matrix.to_cols_array());
+        }
+        NativeStatus::Ok as i32
+    }) else {
+        return NativeStatus::NotFound as i32;
+    };
+    status as i32
 }
 
 
@@ -853,6 +943,86 @@ pub unsafe extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNat
     }
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_animationLoadRaw(
+    mut env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    model: i64,
+    path: JString<'_>,
+    out_animation: JLongArray<'_>,
+) -> i32 {
+    if model < 0 || path.is_null() || out_animation.is_null() {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    match env
+        .with_env(|env| -> JniResult<i32> {
+            if out_animation.len(env)? == 0 {
+                return Ok(NativeStatus::InvalidArgument as i32);
+            }
+            let path = path.try_to_string(env)?;
+            let mut animation = 0_u64;
+            let status = unsafe {
+                mmdskin_animation_load(model as u64, path.as_ptr(), path.len(), &mut animation)
+            };
+            if status == NativeStatus::Ok as i32 {
+                out_animation.set_region(env, 0, &[animation as i64])?;
+            }
+            Ok(status)
+        })
+        .into_outcome()
+    {
+        Outcome::Ok(status) => status,
+        Outcome::Err(_) | Outcome::Panic(_) => NativeStatus::InternalError as i32,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_animationDestroyRaw(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    handle: i64,
+) -> i32 {
+    if handle < 0 {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    mmdskin_animation_destroy(handle as u64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_micheanl_model_client_nativebridge_MMDNative_animationSampleRaw(
+    mut env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    handle: i64,
+    frame: f32,
+    out_skinning_matrices: JFloatArray<'_>,
+) -> i32 {
+    if handle < 0 || out_skinning_matrices.is_null() {
+        return NativeStatus::InvalidArgument as i32;
+    }
+    match env
+        .with_env(|env| -> JniResult<i32> {
+            let len = out_skinning_matrices.len(env)? as usize;
+            let mut matrices = vec![0.0_f32; len];
+            let status = unsafe {
+                mmdskin_animation_sample(
+                    handle as u64,
+                    frame,
+                    matrices.as_mut_ptr(),
+                    matrices.len(),
+                )
+            };
+            if status == NativeStatus::Ok as i32 {
+                out_skinning_matrices.set_region(env, 0, &matrices)?;
+            }
+            Ok(status)
+        })
+        .into_outcome()
+    {
+        Outcome::Ok(status) => status,
+        Outcome::Err(_) | Outcome::Panic(_) => NativeStatus::InternalError as i32,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1141,6 +1311,65 @@ mod tests {
         );
         assert!(summary[0] > 0);
         assert!(summary[1] > 0 || summary[3] > 0);
+    }
+
+    #[test]
+    fn loads_and_samples_vmd_animation_for_model() {
+        let engine = crate::mmdskin_engine_create();
+        let bytes = fs::read(pmx_fixture_path()).unwrap();
+        let model_path = write_temp_model("animated.pmx", &bytes);
+        let mut model = 0_u64;
+
+        assert_eq!(
+            unsafe {
+                crate::mmdskin_model_load(engine, model_path.as_ptr(), model_path.len(), &mut model)
+            },
+            NativeStatus::Ok as i32
+        );
+
+        let vmd_path = vmd_fixture_path()
+            .to_string_lossy()
+            .into_owned()
+            .into_bytes();
+        let mut animation = 0_u64;
+        assert_eq!(
+            unsafe {
+                crate::mmdskin_animation_load(
+                    model,
+                    vmd_path.as_ptr(),
+                    vmd_path.len(),
+                    &mut animation,
+                )
+            },
+            NativeStatus::Ok as i32
+        );
+
+        let mut counts = [0_u32; 4];
+        assert_eq!(
+            unsafe {
+                crate::mmdskin_model_skeleton_counts(model, counts.as_mut_ptr(), counts.len())
+            },
+            NativeStatus::Ok as i32
+        );
+        let mut matrices = vec![0.0_f32; counts[0] as usize * 16];
+        assert_eq!(
+            unsafe {
+                crate::mmdskin_animation_sample(
+                    animation,
+                    12.0,
+                    matrices.as_mut_ptr(),
+                    matrices.len(),
+                )
+            },
+            NativeStatus::Ok as i32
+        );
+        assert_eq!(matrices.len(), counts[0] as usize * 16);
+        assert_eq!(matrices[15], 1.0);
+        assert!(matrices.iter().any(|value| *value != 0.0));
+
+        assert_eq!(crate::mmdskin_animation_destroy(animation), NativeStatus::Ok as i32);
+        assert_eq!(crate::mmdskin_model_destroy(model), NativeStatus::Ok as i32);
+        assert_eq!(crate::mmdskin_engine_destroy(engine), NativeStatus::Ok as i32);
     }
 
     #[test]

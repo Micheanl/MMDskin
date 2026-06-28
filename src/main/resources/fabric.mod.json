@@ -11,6 +11,7 @@
     "license": "CC0-1.0",
     "icon": "assets/mmdskin/icon.png",
     "environment": "*",
+    "accessWidener": "mmdskin.accesswidener",
     "entrypoints": {
         "main": [
             "com.micheanl.model.MMDSkin"

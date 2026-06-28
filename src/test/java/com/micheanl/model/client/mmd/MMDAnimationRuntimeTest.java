@@ -53,6 +53,24 @@ final class MMDAnimationRuntimeTest {
         assertEquals(12, entry.summary().maxFrame());
     }
 
+    @Test
+    void bundledDefaultAnimationResourceIsAvailable() throws Exception {
+        ClassLoader loader = MMDAnimationRuntime.class.getClassLoader();
+
+        try (var input = loader.getResourceAsStream(MMDAnimationRuntime.DEFAULT_ANIMATION_RESOURCE.substring(1))) {
+            List<MMDAnimationRuntime.AnimationEntry> entries = MMDAnimationRuntime.extractDefaultAnimations(
+                    input,
+                    tempDir,
+                    path -> new com.micheanl.model.client.nativebridge.MMDAnimationSummary(1, 1, 0, 0, 0, 0, 0)
+            );
+
+            assertTrue(entries.stream().anyMatch(entry -> entry.action() == MMDPlayerAction.IDLE));
+            assertTrue(entries.stream().anyMatch(entry -> entry.action() == MMDPlayerAction.WALK));
+            assertTrue(entries.stream().anyMatch(entry -> entry.action() == MMDPlayerAction.SWING_LEFT));
+            assertTrue(entries.size() >= 20);
+        }
+    }
+
     private static ZipEntryData entry(String name, byte[] bytes) {
         return new ZipEntryData(name, bytes);
     }

@@ -43,6 +43,12 @@ public final class MMDNative {
 
     private static native int animationSummaryRaw(String path, long[] outSummary);
 
+    private static native int animationLoadRaw(long model, String path, long[] outAnimation);
+
+    private static native int animationDestroyRaw(long handle);
+
+    private static native int animationSampleRaw(long handle, float frame, float[] outSkinningMatrices);
+
     public static MMDNativeEngine engineCreate() {
         return new MMDNativeEngine(engineCreateRaw(), MMDNative::engineDestroy);
     }
@@ -130,6 +136,28 @@ public final class MMDNative {
             throw new IllegalStateException("Native animation summary failed: " + status);
         }
         return new MMDAnimationSummary(summary[0], summary[1], summary[2], summary[3], summary[4], summary[5], summary[6]);
+    }
+
+    static long animationLoad(long model, String path) {
+        long[] animation = new long[1];
+        NativeStatus status = NativeStatus.fromCode(animationLoadRaw(model, path, animation));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native animation load failed: " + status);
+        }
+        return animation[0];
+    }
+
+    static NativeStatus animationDestroy(long handle) {
+        return NativeStatus.fromCode(animationDestroyRaw(handle));
+    }
+
+    static MMDSampledPose animationSample(long handle, float frame, int boneCount) {
+        float[] matrices = new float[checkedArrayLength(Math.multiplyExact((long) boneCount, 16L))];
+        NativeStatus status = NativeStatus.fromCode(animationSampleRaw(handle, frame, matrices));
+        if (status != NativeStatus.OK) {
+            throw new IllegalStateException("Native animation sample failed: " + status);
+        }
+        return new MMDSampledPose(matrices);
     }
 
     private static int checkedArrayLength(long value) {
