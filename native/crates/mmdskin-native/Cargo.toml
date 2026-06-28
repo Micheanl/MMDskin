@@ -1,0 +1,12 @@
+[package]
+name = "mmdskin-native"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mmd-anim = "0.1.7"

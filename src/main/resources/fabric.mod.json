@@ -1,0 +1,35 @@
+{
+    "schemaVersion": 1,
+    "id": "mmdskin",
+    "version": "${version}",
+    "name": "MMDSkin",
+    "description": "MMDSkin Mod",
+    "authors": [
+        "MicheanL"
+    ],
+    "contact": {},
+    "license": "CC0-1.0",
+    "icon": "assets/mmdskin/icon.png",
+    "environment": "*",
+    "entrypoints": {
+        "main": [
+            "com.micheanl.model.MMDSkin"
+        ],
+        "client": [
+            "com.micheanl.model.client.MMDSkinClient"
+        ]
+    },
+    "mixins": [
+        "mmdskin.mixins.json",
+        {
+            "config": "mmdskin.client.mixins.json",
+            "environment": "client"
+        }
+    ],
+    "depends": {
+        "fabricloader": ">=0.19.3",
+        "minecraft": "~26.2",
+        "java": ">=25",
+        "fabric-api": "*"
+    }
+}
