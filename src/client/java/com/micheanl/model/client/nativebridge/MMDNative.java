@@ -1,7 +1,7 @@
 package com.micheanl.model.client.nativebridge;
 
-public final class MmdNative {
-    private MmdNative() {
+public final class MMDNative {
+    private MMDNative() {
     }
 
     public static native int nativeVersion();

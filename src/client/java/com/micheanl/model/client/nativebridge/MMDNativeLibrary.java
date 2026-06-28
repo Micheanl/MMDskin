@@ -2,8 +2,8 @@ package com.micheanl.model.client.nativebridge;
 
 import java.util.Locale;
 
-public final class MmdNativeLibrary {
-    private MmdNativeLibrary() {
+public final class MMDNativeLibrary {
+    private MMDNativeLibrary() {
     }
 
     public static String platformPath(String osName, String osArch) {
